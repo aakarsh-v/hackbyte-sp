@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from starlette.responses import Response
 
 from . import gemini_client
+from .cloudwatch_poller import CloudWatchPoller
 from .executor import execute_lines
 from .models import (
     AnalyzeRequest,
@@ -67,6 +68,7 @@ class AppState:
     def __init__(self) -> None:
         self.ws_clients: list[WebSocket] = []
         self.metrics_events: int = 0
+        self.cw_poller: CloudWatchPoller | None = None
 
 
 state = AppState()
@@ -82,7 +84,25 @@ async def lifespan(_app: FastAPI):
         headers["Authorization"] = f"Bearer {bearer}"
     client = httpx.AsyncClient(base_url=base, timeout=timeout, headers=headers)
     set_http_client(client)
+
+    # Start CloudWatch Logs poller if CW_LOG_GROUP env is configured
+    async def _cw_on_event(
+        service: str, level: str, time: str, message: str, extra: dict
+    ) -> None:
+        from .models import LogEvent
+        event = LogEvent(time=time, service=service, level=level, message=message, extra=extra)
+        await append_log_event(event)
+        state.metrics_events += 1
+        LOGS_INGESTED.labels(service=service, level=level).inc()
+        await broadcast_log(event)
+
+    poller = CloudWatchPoller(on_event=_cw_on_event)
+    state.cw_poller = poller
+    poller.start()
+
     yield
+
+    poller.stop()
     set_http_client(None)
     await client.aclose()
 
