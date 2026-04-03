@@ -5,6 +5,11 @@ __pycache__/
 *.pyc
 .venv/
 *.egg-info/
+.tmp_pip/
+.tmp_pip2/
+
+# SpacetimeDB module build artifacts
+spacetimedb/**/target/
 .DS_Store
 
 # PDF and documents (excluded from GitHub)
@@ -12,3 +17,6 @@ __pycache__/
 *.doc
 *.docx
 *.docs
+
+# Local implementation / roadmap notes (not committed)
+IMPLEMENTATION_STATUS.md

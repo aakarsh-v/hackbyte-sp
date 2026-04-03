@@ -2,6 +2,21 @@ import { useCallback, useEffect, useState } from "react";
 
 const apiBase = import.meta.env.VITE_API_URL || "";
 
+const SESSION_STORAGE_KEY = "devopsai_session_id";
+
+function getOrCreateSessionId(): string {
+  try {
+    let id = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(SESSION_STORAGE_KEY, id);
+    }
+    return id;
+  } catch {
+    return "00000000-0000-0000-0000-000000000001";
+  }
+}
+
 type LogEvent = {
   time: string;
   service: string;
@@ -35,6 +50,7 @@ function wsLogsUrl() {
 }
 
 export function App() {
+  const [sessionId] = useState(() => getOrCreateSessionId());
   const [logs, setLogs] = useState<string[]>([]);
   const [incident, setIncident] = useState(
     "PaymentService returns 503; CPU high on payment-service."
@@ -72,7 +88,10 @@ export function App() {
     try {
       const r = await fetch(`${apiBase}/analyze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Session-Id": sessionId,
+        },
         body: JSON.stringify({
           incident_description: incident,
           include_logs: true,
@@ -101,7 +120,10 @@ export function App() {
     try {
       const r = await fetch(`${apiBase}/execute`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Session-Id": sessionId,
+        },
         body: JSON.stringify({
           content: sanitized,
           content_hash: approvedHash,
