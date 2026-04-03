@@ -9,6 +9,8 @@ AI-augmented DevOps demo: three instrumented services, Prometheus + Grafana, Fas
 
 The stack includes **SpacetimeDB** (standalone in Docker) for persisted log events and **per-session** runbook state (sanitized script + hash). The Rust module in [`spacetimedb/devops-module/`](spacetimedb/devops-module/) defines public tables `log_event` and `session_runbook`, plus reducers `ingest_log` and `upsert_session_runbook`. The FastAPI app talks to SpacetimeDB over its **HTTP API** (`/v1/database/.../call/...` and `/sql`). The web UI sends a stable **`X-Session-Id`** (stored in `localStorage`) on analyze/execute so concurrent operators do not overwrite each other’s runbooks. API clients may omit the header to use the default session id `00000000-0000-0000-0000-000000000001`.
 
+**SpacetimeDB (details):** see [docs/SPACETIMEDB.md](docs/SPACETIMEDB.md) for architecture, environment variables, Compose startup, module schema, backend HTTP mapping, and troubleshooting.
+
 ## Quick start (local)
 
 1. Copy env: `cp .env.example .env` and set `GEMINI_API_KEY`. For Compose, defaults assume **`SPACETIME_HTTP_URL=http://spacetime:3000`** inside the stack (set in `infra/docker-compose.yml`). For tools on the host talking to the published SpacetimeDB port, use **`SPACETIME_HTTP_URL=http://localhost:3004`** (see compose port mapping).
@@ -65,6 +67,8 @@ Opens Vite on port 5173 with proxy to FastAPI on 8000. Run the stack without reb
 - `infra/` — `docker-compose.yml`, Prometheus, Grafana provisioning
 - `web/` — React console (Vite)
 
-## Documentation (local status)
+## Documentation
 
-For a detailed, file-grounded list of **what is implemented** and **planned / future work**, maintain **`IMPLEMENTATION_STATUS.md`** at the repo root. That filename is listed in `.gitignore` so it stays local and is not pushed; create or edit it on your machine as the project evolves.
+- **SpacetimeDB:** [docs/SPACETIMEDB.md](docs/SPACETIMEDB.md) — integration with this repo, configuration, and operations.
+
+For a detailed, file-grounded list of **what is implemented** and **planned / future work**, you can maintain **`IMPLEMENTATION_STATUS.md`** at the repo root locally. Root-level Markdown files other than `README.md` are gitignored by default (see `.gitignore`); use `git add -f` only if you intentionally want to commit extra docs.

@@ -18,5 +18,7 @@ spacetimedb/**/target/
 *.docx
 *.docs
 
-# Local implementation / roadmap notes (not committed)
-IMPLEMENTATION_STATUS.md
+# Markdown: keep README and SpacetimeDB integration guide; ignore other local notes
+*.md
+!README.md
+!docs/SPACETIMEDB.md
