@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: services
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - auth-service:8080
+          - payment-service:8080
+          - frontend-service:8080
+        labels:
+          env: local

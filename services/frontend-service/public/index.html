@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Mini Frontend</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; }
+      pre { background: #111; color: #0f0; padding: 1rem; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Frontend service</h1>
+    <p>Calls auth and payment APIs (same host, mapped ports).</p>
+    <button id="login">Login demo</button>
+    <button id="pay">Pay</button>
+    <pre id="out"></pre>
+    <script>
+      const host = location.hostname;
+      const authBase = location.protocol + "//" + host + ":8081";
+      const payBase = location.protocol + "//" + host + ":8082";
+      const out = document.getElementById("out");
+      document.getElementById("login").onclick = async () => {
+        const r = await fetch(authBase + "/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ user: "demo", password: "demo" }),
+        });
+        out.textContent = await r.text();
+      };
+      document.getElementById("pay").onclick = async () => {
+        const r = await fetch(payBase + "/pay", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount: 10 }),
+        });
+        out.textContent = await r.text();
+      };
+    </script>
+  </body>
+</html>
