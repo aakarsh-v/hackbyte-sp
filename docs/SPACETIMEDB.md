@@ -124,6 +124,60 @@ Clean WASM build artifacts are ignored via `.gitignore` (`spacetimedb/**/target/
 | Slow first `docker compose up` | First `spacetime publish` compiles Rust to WASM; wait for **`st-init`** to complete. |
 | `LOG_BUFFER_MAX` mismatch | Align Rust `LOG_BUFFER_MAX` in `lib.rs` with backend env so behavior matches expectations. |
 
+### Windows: `spacetime` is not recognized after install
+
+**You usually do not need the Spacetime CLI on Windows for this repo.** The full stack uses Docker Compose: the **`spacetime`** and **`st-init`** services run the server and `spacetime publish` inside containers. Run `docker compose -f infra/docker-compose.yml --env-file .env up --build` from the repo root and use `http://localhost:3004/v1/ping` on the host to check the server.
+
+If you still need the **local** CLI (e.g. manual `spacetime start` / publish on the host):
+
+1. **Restart the terminal** (or sign out and back in). Installers often update PATH; the current PowerShell session may not see it yet.
+2. **Reload PATH** in the current session, then try again:
+   ```powershell
+   $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+   spacetime --version
+   ```
+3. **Confirm the binary exists** — the installer may not use `%USERPROFILE%\.spacetime\bin`. Search:
+   ```powershell
+   where.exe spacetime 2>$null
+   Get-ChildItem -Path $env:USERPROFILE -Filter spacetime.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 3 FullName
+   ```
+4. If nothing is found, **re-run** the [official Windows install](https://spacetimedb.com/docs) or use **WSL/Linux** for CLI workflows.
+
+---
+
+## Maincloud (hosted SpacetimeDB)
+
+1. **Log in** (once): `spacetime login` — links the CLI to your [spacetimedb.com](https://spacetimedb.com/) account.
+2. **Publish** the module (database name must match `SPACETIME_DATABASE`, default `devopsai`):
+
+   ```bash
+   cd spacetimedb/devops-module
+   spacetime publish devopsai --server maincloud -y
+   ```
+
+   On **Windows**, if Rust/`wasm32-unknown-unknown` or MSVC `link.exe` is missing, publish from Docker (mounts your CLI config for auth):
+
+   ```powershell
+   .\scripts\publish-maincloud-docker.ps1
+   ```
+
+   Config is read from `%LOCALAPPDATA%\SpacetimeDB\config` and mounted at `/home/spacetime/.config/spacetime` in the container.
+
+3. **Point the backend** at Maincloud in `.env`:
+
+   - `SPACETIME_HTTP_URL=https://maincloud.spacetimedb.com`
+   - `SPACETIME_BEARER_TOKEN=<spacetimedb_token from cli.toml>` — same long JWT as in your local SpacetimeDB config after `spacetime login` (required for reducer/SQL calls on Maincloud in this setup).
+
+4. **Run Compose without** the embedded `spacetime` / `st-init` services — they are behind profile `local-spacetime`. Use:
+
+   ```bash
+   docker compose -f infra/docker-compose.yml --env-file .env up -d --build
+   ```
+
+   Or `npm run stack:up:maincloud`. For the **embedded local** DB instead, use `npm run stack:up` / `stack:up:detached` (adds `--profile local-spacetime`).
+
+Dashboard link after publish is printed by the CLI (e.g. `https://spacetimedb.com/devopsai`).
+
 ---
 
 ## Further reading

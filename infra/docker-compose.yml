@@ -1,5 +1,8 @@
+# Use profile "local-spacetime" for embedded SpacetimeDB + publish.
+# Omit the profile when SPACETIME_HTTP_URL points at Maincloud (https://maincloud.spacetimedb.com).
 services:
   spacetime:
+    profiles: ["local-spacetime"]
     image: clockworklabs/spacetime:latest
     container_name: spacetime
     command: ["start", "--listen-addr", "0.0.0.0:3000", "--non-interactive"]
@@ -13,6 +16,7 @@ services:
       start_period: 10s
 
   st-init:
+    profiles: ["local-spacetime"]
     image: clockworklabs/spacetime:latest
     depends_on:
       spacetime:
@@ -66,14 +70,17 @@ services:
     depends_on:
       st-init:
         condition: service_completed_successfully
+        required: false
       spacetime:
         condition: service_healthy
+        required: false
     ports:
       - "8000:8000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       SPACETIME_HTTP_URL: ${SPACETIME_HTTP_URL:-http://spacetime:3000}
+      SPACETIME_BEARER_TOKEN: ${SPACETIME_BEARER_TOKEN:-}
       SPACETIME_DATABASE: ${SPACETIME_DATABASE:-devopsai}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}

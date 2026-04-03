@@ -1,0 +1,18 @@
+{
+  "name": "devops-ai-platform",
+  "private": true,
+  "description": "Root npm scripts: build web UI, Docker Compose stack, and tests",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:web": "npm ci --prefix web && npm run build --prefix web",
+    "stack:up": "docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env up --build",
+    "stack:up:detached": "docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env up -d --build",
+    "stack:down": "docker compose -f infra/docker-compose.yml --env-file .env down",
+    "stack:up:maincloud": "docker compose -f infra/docker-compose.yml --env-file .env up -d --build",
+    "test": "npm run test:unit",
+    "test:unit": "npm test --prefix backend",
+    "test:e2e": "bash scripts/verify-stack.sh"
+  }
+}

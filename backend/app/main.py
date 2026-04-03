@@ -47,7 +47,11 @@ state = AppState()
 async def lifespan(_app: FastAPI):
     base = os.environ.get("SPACETIME_HTTP_URL", "http://localhost:3000").rstrip("/")
     timeout = float(os.environ.get("SPACETIME_HTTP_TIMEOUT", "60"))
-    client = httpx.AsyncClient(base_url=base, timeout=timeout)
+    headers: dict[str, str] = {}
+    bearer = os.environ.get("SPACETIME_BEARER_TOKEN", "").strip()
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+    client = httpx.AsyncClient(base_url=base, timeout=timeout, headers=headers)
     set_http_client(client)
     yield
     set_http_client(None)
@@ -64,6 +68,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 async def broadcast_log(event: LogEvent) -> None:
@@ -211,8 +220,3 @@ for _rel in (("..", "web", "dist"), ("..", "..", "web", "dist")):
     if os.path.isdir(_web_dist):
         app.mount("/", StaticFiles(directory=_web_dist, html=True), name="ui")
         break
-
-
-@app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}

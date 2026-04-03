@@ -28,10 +28,15 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Backend install and pytest
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+          python -m pytest tests -v
+
       - name: Backend smoke import
         working-directory: backend
         run: |
-          pip install -r requirements.txt
           python -c "from app import policy; print(policy.preview_policy('docker restart payment-service'))"
 
       - name: Set up Docker Buildx
@@ -39,4 +44,47 @@ jobs:
 
       - name: Docker Compose build
         working-directory: infra
-        run: docker compose build
+        run: docker compose --profile local-spacetime build
+
+  e2e-compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Web install and build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            spacetimedb/devops-module/target
+          key: ${{ runner.os }}-spacetime-cargo-${{ hashFiles('spacetimedb/devops-module/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-spacetime-cargo-
+
+      - name: Prepare .env
+        run: cp .env.example .env
+
+      - name: Docker Compose up
+        run: docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env up -d --build
+
+      - name: Stack verification (E2E)
+        env:
+          WAIT_SECS: "1200"
+        run: bash scripts/verify-stack.sh
+
+      - name: Teardown
+        if: always()
+        run: docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env down -v

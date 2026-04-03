@@ -1,0 +1,7 @@
+{
+  "name": "devops-ai-backend",
+  "private": true,
+  "scripts": {
+    "test": "python -m pytest tests -v"
+  }
+}
