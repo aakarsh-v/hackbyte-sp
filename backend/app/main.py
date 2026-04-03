@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 from pydantic import BaseModel
+from starlette.responses import Response
 
 from . import gemini_client
 from .executor import execute_lines
@@ -32,6 +37,30 @@ from .policy import hash_content, parse_executable_lines, preview_policy
 from .session_id import normalize_session_id
 
 LOG_BUFFER_MAX = int(os.environ.get("LOG_BUFFER_MAX", "2000"))
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics for the backend itself
+# ---------------------------------------------------------------------------
+LOGS_INGESTED = Counter(
+    "devopsai_logs_ingested_total",
+    "Total log events ingested",
+    ["service", "level"],
+)
+ANALYZE_REQUESTS = Counter(
+    "devopsai_analyze_requests_total",
+    "Total /analyze requests",
+    ["result"],  # "ok" | "fallback"
+)
+EXECUTE_REQUESTS = Counter(
+    "devopsai_execute_requests_total",
+    "Total /execute requests",
+    ["result"],  # "ok" | "blocked" | "error"
+)
+APPROVE_REQUESTS = Counter(
+    "devopsai_approve_requests_total",
+    "Total /approve requests",
+    ["result"],  # "ok" | "rejected"
+)
 
 
 class AppState:
@@ -58,7 +87,7 @@ async def lifespan(_app: FastAPI):
     await client.aclose()
 
 
-app = FastAPI(title="DevOps AI Platform API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="DevOps AI Platform API", version="0.2.0", lifespan=lifespan)
 
 _origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")
 app.add_middleware(
@@ -68,11 +97,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
 
 
 async def broadcast_log(event: LogEvent) -> None:
@@ -88,10 +112,15 @@ async def broadcast_log(event: LogEvent) -> None:
             state.ws_clients.remove(ws)
 
 
+# ---------------------------------------------------------------------------
+# Ingest
+# ---------------------------------------------------------------------------
+
 @app.post("/ingest")
 async def ingest_one(event: LogEvent) -> dict[str, str]:
     await append_log_event(event)
     state.metrics_events += 1
+    LOGS_INGESTED.labels(service=event.service, level=event.level).inc()
     await broadcast_log(event)
     return {"status": "ok"}
 
@@ -101,9 +130,14 @@ async def ingest_batch(batch: LogIngestBatch) -> dict[str, Any]:
     for e in batch.events:
         await append_log_event(e)
         state.metrics_events += 1
+        LOGS_INGESTED.labels(service=e.service, level=e.level).inc()
         await broadcast_log(e)
     return {"status": "ok", "count": len(batch.events)}
 
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
 
 @app.get("/logs")
 async def get_logs(limit: int = 500) -> dict[str, Any]:
@@ -130,6 +164,20 @@ async def ws_logs(ws: WebSocket) -> None:
             state.ws_clients.remove(ws)
 
 
+# ---------------------------------------------------------------------------
+# Prometheus metrics endpoint for the backend itself
+# ---------------------------------------------------------------------------
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    data = generate_latest()
+    return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+
+# ---------------------------------------------------------------------------
+# Analyze
+# ---------------------------------------------------------------------------
+
 @app.post("/analyze", response_model=GeminiAnalysisResponse)
 async def analyze(
     req: AnalyzeRequest,
@@ -145,10 +193,12 @@ async def analyze(
             log_excerpt=log_excerpt,
             metrics_hint=req.include_metrics_hint,
         )
+        ANALYZE_REQUESTS.labels(result="ok").inc()
     except Exception:
         analysis, raw_runbook, preview, h = gemini_client.fallback_template(
             req.incident_description, log_excerpt
         )
+        ANALYZE_REQUESTS.labels(result="fallback").inc()
     sanitized = "\n".join(preview.sanitized_lines)
     sid = normalize_session_id(x_session_id)
     await upsert_session_runbook(
@@ -164,6 +214,10 @@ async def analyze(
     )
 
 
+# ---------------------------------------------------------------------------
+# Policy preview (for re-hash when user edits the runbook)
+# ---------------------------------------------------------------------------
+
 class PreviewBody(BaseModel):
     script: str
 
@@ -173,6 +227,10 @@ async def policy_preview(body: PreviewBody) -> PolicyPreviewResponse:
     return preview_policy(body.script)
 
 
+# ---------------------------------------------------------------------------
+# Approve — mandatory gate before execute
+# ---------------------------------------------------------------------------
+
 @app.post("/approve")
 async def approve(
     req: ApproveRequest,
@@ -181,12 +239,26 @@ async def approve(
     sid = normalize_session_id(x_session_id)
     last_sanitized, last_hash = await get_session_runbook(sid)
     h = hash_content(req.content)
-    if last_hash and h != req.content_hash:
-        raise HTTPException(400, "content_hash does not match approved sanitized script")
+    if h != req.content_hash:
+        APPROVE_REQUESTS.labels(result="rejected").inc()
+        raise HTTPException(400, "content_hash does not match submitted content")
+    # If there's a stored runbook, the submitted content must match it
     if last_sanitized and req.content.strip() != last_sanitized.strip():
-        raise HTTPException(400, "content must match last sanitized runbook")
+        APPROVE_REQUESTS.labels(result="rejected").inc()
+        raise HTTPException(400, "content must match last sanitized runbook from /analyze")
+    # Update stored runbook with exactly what operator approved (may have been edited)
+    await upsert_session_runbook(
+        session_id=sid,
+        last_sanitized=req.content,
+        last_sanitized_hash=h,
+    )
+    APPROVE_REQUESTS.labels(result="ok").inc()
     return {"status": "approved", "hash": h}
 
+
+# ---------------------------------------------------------------------------
+# Execute — requires prior /approve (checks stored approved content + hash)
+# ---------------------------------------------------------------------------
 
 @app.post("/execute", response_model=ExecuteResponse)
 async def execute(
@@ -197,9 +269,11 @@ async def execute(
     last_sanitized, last_hash = await get_session_runbook(sid)
     h = hash_content(req.content)
     if not last_hash or h != req.content_hash:
-        raise HTTPException(400, "invalid or missing approval hash")
+        EXECUTE_REQUESTS.labels(result="error").inc()
+        raise HTTPException(400, "invalid or missing approval hash — call /approve first")
     if req.content.strip() != (last_sanitized or "").strip():
-        raise HTTPException(400, "content must match last sanitized runbook")
+        EXECUTE_REQUESTS.labels(result="error").inc()
+        raise HTTPException(400, "content must match last approved runbook")
 
     allow = os.environ.get("ALLOW_DOCKER_EXEC", "true").lower() in ("1", "true", "yes")
     lines = parse_executable_lines(req.content)
@@ -210,10 +284,64 @@ async def execute(
     err = None
     if any("blocked" in o.lower() for o in out):
         err = "some lines were blocked at JIT — see output"
+        EXECUTE_REQUESTS.labels(result="blocked").inc()
+    else:
+        EXECUTE_REQUESTS.labels(result="ok").inc()
     return ExecuteResponse(ok=err is None, steps_run=lines, output=out, error=err)
 
 
+# ---------------------------------------------------------------------------
+# Execute/stream — SSE endpoint, yields output lines as they arrive
+# ---------------------------------------------------------------------------
+
+@app.post("/execute/stream")
+async def execute_stream(
+    req: ApproveRequest,
+    x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+) -> StreamingResponse:
+    sid = normalize_session_id(x_session_id)
+    last_sanitized, last_hash = await get_session_runbook(sid)
+    h = hash_content(req.content)
+    if not last_hash or h != req.content_hash:
+        raise HTTPException(400, "invalid or missing approval hash — call /approve first")
+    if req.content.strip() != (last_sanitized or "").strip():
+        raise HTTPException(400, "content must match last approved runbook")
+
+    allow = os.environ.get("ALLOW_DOCKER_EXEC", "true").lower() in ("1", "true", "yes")
+    lines = parse_executable_lines(req.content)
+
+    async def event_generator() -> AsyncIterator[str]:
+        try:
+            async for chunk in execute_lines(lines, allow_docker=allow):
+                payload = json.dumps({"type": "output", "data": chunk})
+                yield f"data: {payload}\n\n"
+                await asyncio.sleep(0)  # let event loop breathe
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'data': str(exc)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Health
+# ---------------------------------------------------------------------------
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
 # Static UI: Docker uses /app/app + ../web/dist; local dev uses backend/app + ../../web/dist
+# ---------------------------------------------------------------------------
 _here = os.path.dirname(os.path.abspath(__file__))
 for _rel in (("..", "web", "dist"), ("..", "..", "web", "dist")):
     _web_dist = os.path.abspath(os.path.join(_here, *_rel))
