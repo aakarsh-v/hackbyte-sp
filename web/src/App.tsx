@@ -9,6 +9,7 @@ import {
   Terminal,
   CheckCircle2,
   Database,
+  MessageSquare,
 } from "lucide-react";
 
 // @ts-ignore
@@ -84,6 +85,10 @@ export function App() {
   const [approving, setApproving] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [revalidating, setRevalidating] = useState(false);
+  const [nlQuestion, setNlQuestion] = useState("");
+  const [nlAnswer, setNlAnswer] = useState("");
+  const [nlLoading, setNlLoading] = useState(false);
+  const [includeRunbookHints, setIncludeRunbookHints] = useState(true);
 
   const revalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const logBoxRef = useRef<HTMLPreElement>(null);
@@ -199,6 +204,31 @@ export function App() {
       setAnalysis(String(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const runIncidentQuery = async () => {
+    const q = nlQuestion.trim();
+    if (!q) return;
+    setNlLoading(true);
+    setNlAnswer("");
+    try {
+      const r = await fetch(`${apiBase}/incident-query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: q,
+          log_limit: 600,
+          include_runbook_hints: includeRunbookHints,
+        }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      const data: { answer: string } = await r.json();
+      setNlAnswer(data.answer);
+    } catch (e) {
+      setNlAnswer(String(e));
+    } finally {
+      setNlLoading(false);
     }
   };
 
@@ -402,6 +432,65 @@ export function App() {
             <Plane size={18} /> {loading ? "Analyzing Models..." : "SuperPlane Analysis"}
           </button>
         </div>
+      </div>
+
+      <div className="glass-panel" style={{ marginTop: "1rem" }}>
+        <div className="panel-header">
+          <MessageSquare size={16} /> Ask your logs (natural language)
+        </div>
+        <p
+          style={{
+            fontSize: "0.85rem",
+            color: "var(--muted, #888)",
+            marginBottom: "0.75rem",
+            lineHeight: 1.45,
+          }}
+        >
+          Answers use the same stored log excerpt as the backend (plus optional recent runbook
+          snippets). Questions about fix duration or MTTR need timestamps in the logs; approved
+          runbook history has no per-row timing in the database.
+        </p>
+        <label className="input-label">Your question</label>
+        <textarea
+          value={nlQuestion}
+          onChange={(e) => setNlQuestion(e.target.value)}
+          placeholder='e.g. "How many payment-service errors appear in the recent logs?"'
+          style={{ minHeight: "88px", marginBottom: "0.5rem", width: "100%" }}
+        />
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            cursor: "pointer",
+            marginBottom: "0.75rem",
+            fontSize: "0.9rem",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={includeRunbookHints}
+            onChange={(e) => setIncludeRunbookHints(e.target.checked)}
+          />
+          <span>Include recent runbook hints (truncated)</span>
+        </label>
+        <button
+          type="button"
+          className="btn primary"
+          disabled={nlLoading || !nlQuestion.trim()}
+          onClick={runIncidentQuery}
+          style={{ marginBottom: "0.75rem" }}
+        >
+          {nlLoading ? "Thinking…" : "Ask"}
+        </button>
+        {nlAnswer && (
+          <pre
+            className="terminal stream-sys"
+            style={{ whiteSpace: "pre-wrap", maxHeight: "280px", overflow: "auto" }}
+          >
+            {nlAnswer}
+          </pre>
+        )}
       </div>
 
       {(analysis || rawRunbook) && (

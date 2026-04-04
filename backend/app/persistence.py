@@ -303,3 +303,57 @@ async def get_session_runbook(session_id: str) -> tuple[str | None, str | None]:
     last_sanitized = str(row[sanitized_idx])
     last_hash = str(row[hash_idx])
     return last_sanitized, last_hash
+
+
+def _session_runbook_row_parts(row: list[Any]) -> tuple[str, str]:
+    """Best-effort (session_id, truncated_script) for one history row."""
+    sid = ""
+    script = ""
+    for cell in row:
+        s = str(cell).strip()
+        if _looks_like_uuid(s):
+            sid = s
+        elif _is_sha256_hex(s):
+            continue
+        elif _cell_as_id_int(cell) is not None:
+            continue
+        else:
+            if len(s) > len(script):
+                script = s
+    max_len = 400
+    if len(script) > max_len:
+        script = script[:max_len] + "…"
+    return sid, script
+
+
+async def fetch_recent_runbook_summaries(limit: int) -> str:
+    """Return a compact text block of recent runbook rows for NL context (no DB timestamps)."""
+    limit = max(1, min(int(limit), 50))
+    try:
+        c = _client()
+        r = await c.post(
+            f"/v1/database/{_database_name()}/sql",
+            content=b"SELECT * FROM session_runbook_history",
+            headers={"Content-Type": "text/plain"},
+        )
+        r.raise_for_status()
+        data = r.json()
+        block = data[0].get("rows") if data else None
+        if not block:
+            return ""
+    except Exception:
+        return ""
+    rows: list[list[Any]] = list(block)
+    if not rows:
+        return ""
+    id_idx = _infer_id_column_index(rows)
+    try:
+        rows.sort(key=lambda r: int(_cell_as_id_int(r[id_idx]) or 0))
+    except Exception:
+        pass
+    tail = rows[-limit:]
+    lines: list[str] = []
+    for i, row in enumerate(tail, start=1):
+        sid, script = _session_runbook_row_parts(row)
+        lines.append(f"[{i}] session={sid or '?'} … {script}")
+    return "\n".join(lines)

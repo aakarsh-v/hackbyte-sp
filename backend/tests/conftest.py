@@ -37,10 +37,14 @@ def patched_persistence(mock_store: dict, monkeypatch: pytest.MonkeyPatch):
             return None, None
         return hist[-1]
 
+    async def fetch_recent_runbook_summaries(limit: int) -> str:
+        return ""
+
     monkeypatch.setattr("app.main.append_log_event", append_log_event)
     monkeypatch.setattr("app.main.fetch_log_tail", fetch_log_tail)
     monkeypatch.setattr("app.main.append_session_runbook", append_session_runbook)
     monkeypatch.setattr("app.main.get_session_runbook", get_session_runbook)
+    monkeypatch.setattr("app.main.fetch_recent_runbook_summaries", fetch_recent_runbook_summaries)
 
 
 @pytest.fixture

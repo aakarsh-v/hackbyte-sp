@@ -83,7 +83,7 @@ npm run stack:up
 npm run stack:up:detached
 ```
 
-**Then open the app:** [http://localhost:8000/](http://localhost:8000/) (main console).
+**Then open the app:** [http://localhost:8000/](http://localhost:8000/) (main console). In the **SuperPlane Sandbox** tab, use **Ask your logs (natural language)** to query recent stored logs in plain English (`POST /incident-query`; set `GEMINI_API_KEY` for full answers).
 
 **Stop the stack** (if you used detached mode):
 
@@ -322,6 +322,15 @@ Opens **http://localhost:5173** with a proxy to FastAPI on **8000**. Run the Com
 - `POST /ingest` — JSON: `{ "service", "level", "message", "time"? }`
 - `POST /analyze` — `{ "incident_description", "include_logs", "include_metrics_hint" }`; optional header **`X-Session-Id`** (UUID)
 - `POST /execute` — `{ "content", "content_hash" }` matching the last sanitized runbook for that session; same **`X-Session-Id`** as analyze
+- `POST /incident-query` — `{ "question", "log_limit"?, "include_runbook_hints"? }` — natural-language answers **only** from a recent log excerpt (and optional truncated runbook snippets). Requires **`GEMINI_API_KEY`** for full LLM answers; without it, the backend returns a small heuristic summary. **Limitation:** runbook history rows have **no timestamps**, so questions like “time to fix” or “MTTR” cannot be answered unless inferable from **`logs.time`** / message text; set `INCIDENT_QUERY_MAX_LOG_CHARS` (default `120000`) to cap prompt size.
+
+Example:
+
+```bash
+curl -sf -X POST http://localhost:8000/incident-query \
+  -H "Content-Type: application/json" \
+  -d '{"question":"How many ERROR lines mention payment in recent logs?","log_limit":400}'
+```
 
 ---
 

@@ -252,3 +252,70 @@ def fallback_template(
     preview = preview_policy(raw)
     sanitized = "\n".join(preview.sanitized_lines)
     return analysis, raw, preview, hash_content(sanitized)
+
+
+def incident_query_fallback(
+    question: str, log_excerpt: str, runbook_excerpt: str
+) -> str:
+    """Tiny heuristic summary when GEMINI_API_KEY is unset (demo-friendly)."""
+    lines = [ln for ln in log_excerpt.splitlines() if ln.strip()]
+    n = len(lines)
+    err = sum(
+        1
+        for ln in lines
+        if "ERROR" in ln or "FATAL" in ln or "CRITICAL" in ln
+    )
+    pay = sum(1 for ln in lines if "payment" in ln.lower())
+    qlow = question.lower()
+    bits = [
+        "[Local] GEMINI_API_KEY is not set — heuristic summary only, not a full NL answer.",
+        f"Log lines in excerpt: {n}.",
+        f"Lines containing ERROR/FATAL/CRITICAL: {err}.",
+        f"Lines mentioning 'payment' (case-insensitive): {pay}.",
+    ]
+    if "crash" in qlow or "crash" in log_excerpt.lower():
+        crashish = sum(
+            1
+            for ln in lines
+            if "crash" in ln.lower() or "panic" in ln.lower() or "137" in ln
+        )
+        bits.append(f"Lines suggesting crash/OOM/panic (heuristic): {crashish}.")
+    if runbook_excerpt.strip():
+        bits.append(
+            f"Recent runbook snippets (truncated) were available ({len(runbook_excerpt)} chars)."
+        )
+    bits.append(
+        "Set GEMINI_API_KEY for full natural-language answers grounded in the excerpt."
+    )
+    return "\n".join(bits)
+
+
+async def answer_incident_question(
+    *,
+    question: str,
+    log_excerpt: str,
+    runbook_excerpt: str = "",
+) -> str:
+    """Answer a plain-English question using only provided logs/runbook text."""
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
+        return incident_query_fallback(question, log_excerpt, runbook_excerpt)
+
+    prompt = f"""You assist on-call engineers. Answer ONLY using the LOG EXCERPT and optional RUNBOOK SNIPPETS below.
+Rules:
+- If the question needs data not present (e.g. exact MTTR, duration to fix, or a time range with no timestamps in logs), say clearly that the excerpt is insufficient and what is missing.
+- Prefer quoting or paraphrasing log lines as evidence. Do not invent incident counts or timelines.
+- The runbook table has no per-row timestamps; do not infer fix duration from it.
+
+QUESTION:
+{question.strip()}
+
+LOG EXCERPT (lines include time when the system recorded it):
+{log_excerpt or "(no logs in excerpt)"}
+"""
+    if (runbook_excerpt or "").strip():
+        prompt += f"""
+RECENT RUNBOOK SNIPPETS (truncated; no timing metadata in database):
+{runbook_excerpt.strip()}
+"""
+    return await asyncio.to_thread(_sync_generate, prompt)

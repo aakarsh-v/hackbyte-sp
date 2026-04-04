@@ -76,3 +76,20 @@ class GeminiAnalysisResponse(BaseModel):
     raw_runbook: str
     preview: PolicyPreviewResponse
     approved_hash: str | None = None
+
+
+class IncidentQueryRequest(BaseModel):
+    """Plain-English question over stored logs (and optional runbook hints)."""
+
+    question: str = ""
+    """User question, e.g. counts, common errors, time-bounded patterns."""
+
+    log_limit: int = 600
+    """Max log lines to load (capped server-side by LOG_BUFFER_MAX)."""
+
+    include_runbook_hints: bool = True
+    """When True, append recent truncated runbook rows (no timestamps in DB)."""
+
+
+class IncidentQueryResponse(BaseModel):
+    answer: str

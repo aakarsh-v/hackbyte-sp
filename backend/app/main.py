@@ -23,6 +23,8 @@ from .models import (
     ApproveRequest,
     ExecuteResponse,
     GeminiAnalysisResponse,
+    IncidentQueryRequest,
+    IncidentQueryResponse,
     LogEvent,
     LogIngestBatch,
     PolicyPreviewResponse,
@@ -30,6 +32,7 @@ from .models import (
 from .persistence import (
     append_log_event,
     fetch_log_tail,
+    fetch_recent_runbook_summaries,
     get_session_runbook,
     set_http_client,
     append_session_runbook,
@@ -62,6 +65,11 @@ APPROVE_REQUESTS = Counter(
     "devopsai_approve_requests_total",
     "Total /approve requests",
     ["result"],  # "ok" | "rejected"
+)
+INCIDENT_QUERY = Counter(
+    "devopsai_incident_query_total",
+    "Total /incident-query requests",
+    ["result"],  # "ok" | "fallback"
 )
 
 
@@ -208,6 +216,52 @@ async def ws_logs(ws: WebSocket) -> None:
 async def metrics() -> Response:
     data = generate_latest()
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)
+
+
+# ---------------------------------------------------------------------------
+# Natural language incident query (logs + optional runbook hints)
+# ---------------------------------------------------------------------------
+
+@app.post("/incident-query", response_model=IncidentQueryResponse)
+async def incident_query(req: IncidentQueryRequest) -> IncidentQueryResponse:
+    q = (req.question or "").strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="question is required")
+    lim = min(max(req.log_limit, 1), LOG_BUFFER_MAX)
+    try:
+        lines = await fetch_log_tail(lim)
+    except Exception:
+        lines = list(state.log_buffer)[-lim:]
+    log_excerpt = "\n".join(
+        f"{e.time} {e.service} [{e.level}] {e.message}" for e in lines
+    )
+    max_chars = int(os.environ.get("INCIDENT_QUERY_MAX_LOG_CHARS", "120000"))
+    if len(log_excerpt) > max_chars:
+        log_excerpt = log_excerpt[-max_chars:]
+
+    runbook_excerpt = ""
+    if req.include_runbook_hints:
+        try:
+            runbook_excerpt = await fetch_recent_runbook_summaries(20)
+        except Exception as exc:
+            print(f"[incident-query] runbook hints skipped: {exc}")
+
+    try:
+        answer = await gemini_client.answer_incident_question(
+            question=q,
+            log_excerpt=log_excerpt,
+            runbook_excerpt=runbook_excerpt,
+        )
+    except Exception as exc:
+        print(f"[incident-query] Gemini error: {exc}")
+        answer = gemini_client.incident_query_fallback(q, log_excerpt, runbook_excerpt)
+        INCIDENT_QUERY.labels(result="fallback").inc()
+    else:
+        if os.environ.get("GEMINI_API_KEY", "").strip():
+            INCIDENT_QUERY.labels(result="ok").inc()
+        else:
+            INCIDENT_QUERY.labels(result="fallback").inc()
+    return IncidentQueryResponse(answer=answer)
 
 
 # ---------------------------------------------------------------------------
