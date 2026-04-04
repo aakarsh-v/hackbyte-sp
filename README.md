@@ -21,7 +21,7 @@ flowchart TB
   end
   subgraph obs["Observability"]
     PR["Prometheus :9090"]
-    GF["Grafana :3000"]
+    GF["Grafana :3002"]
   end
   subgraph demo["Demo microservices"]
     A["auth :8081"]
@@ -59,6 +59,51 @@ flowchart TB
 | **bash**, **curl** | E2E script `scripts/verify-stack.sh` (Git Bash or WSL on Windows) |
 
 - **Google AI Studio API key** for Gemini — optional; the backend uses fallback templates when it is not set.
+
+---
+
+## Quick start — commands to run the program
+
+From the **repository root** (Linux, macOS, or **Git Bash / WSL** on Windows):
+
+```bash
+# 1) Environment (copy example and optionally edit GEMINI_API_KEY, etc.)
+cp .env.example .env
+
+# 2) Build the web UI (required before Docker build — embeds web/dist in the backend image)
+npm run build:web
+
+# 3) Start the full stack with local SpacetimeDB (foreground — Ctrl+C stops everything)
+npm run stack:up
+```
+
+**Run in the background** instead of step 3:
+
+```bash
+npm run stack:up:detached
+```
+
+**Then open the app:** [http://localhost:8000/](http://localhost:8000/) (main console).
+
+**Stop the stack** (if you used detached mode):
+
+```bash
+npm run stack:down
+```
+
+**Optional checks** (with the stack running, second terminal):
+
+```bash
+curl -sf http://localhost:8000/health
+```
+
+For SpacetimeDB **Maincloud** instead of local Docker SpacetimeDB, configure `SPACETIME_HTTP_URL` and `SPACETIME_BEARER_TOKEN` in `.env` per [docs/SPACETIMEDB.md](docs/SPACETIMEDB.md), build the web as above, then:
+
+```bash
+npm run stack:up:maincloud
+```
+
+Details, URLs for all services, and troubleshooting: see **Run the application (step by step)** below.
 
 ---
 
@@ -146,7 +191,7 @@ If the backend seems slow to listen, wait; the E2E script can wait up to **600s*
 | **Console UI** (React, served by backend) | http://localhost:8000/ | Main demo |
 | **Backend health** | http://localhost:8000/health | JSON health |
 | **SpacetimeDB** (host) | http://localhost:3004/v1/ping | Should return 200 |
-| **Grafana** | http://localhost:3000/ | admin / admin |
+| **Grafana** | http://localhost:3002/ | admin / admin (host port from Compose) |
 | **Prometheus** | http://localhost:9090/ | Metrics UI |
 | **Mini frontend app** | http://localhost:3001/ | Generates traffic |
 | **Auth API** | http://localhost:8081/health | |
