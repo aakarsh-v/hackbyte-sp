@@ -7,7 +7,9 @@ import shlex
 from .models import PolicyPreviewResponse, PolicyViolation
 
 
-# Dangerous patterns (PDF + common agent risks)
+# ---------------------------------------------------------------------------
+# Deny list — always blocked regardless of allowlist
+# ---------------------------------------------------------------------------
 _DENY_RES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"rm\s+-rf\s+/(?!\s)"), "recursive delete on root or dangerous path"),
     (re.compile(r"rm\s+.*--no-preserve-root"), "rm with no-preserve-root"),
@@ -22,14 +24,32 @@ _DENY_RES: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"BEGIN\s+[A-Z0-9 -]*PRIVATE KEY"),
         "private key material blocked by policy",
     ),
+    (re.compile(r"chmod\s+777\s+/"), "chmod 777 on system root"),
+    (re.compile(r"shutdown|poweroff|halt|reboot"), "system shutdown command"),
 ]
 
-# Allowlist prefixes for demo (conservative)
+# ---------------------------------------------------------------------------
+# Allowlist — commands that pass policy (expanded for cloud operations)
+# ---------------------------------------------------------------------------
 ALLOW_PREFIXES = (
+    # Container management
     "docker ",
     "docker compose ",
+    # Shell utilities (safe)
     "echo ",
     "sleep ",
+    # AWS CLI for EC2 management
+    "aws ec2 ",
+    "aws cloudwatch ",
+    "aws logs ",
+    "aws ecs ",
+    "aws ssm ",
+    # Linux service management (restricted to restart/status, not disable)
+    "systemctl restart ",
+    "systemctl start ",
+    "systemctl status ",
+    "systemctl reload ",
+    # Comments always allowed
     "#",
 )
 
@@ -48,6 +68,8 @@ def _check_line(line: str) -> str | None:
     stripped = line.strip()
     if not stripped or stripped.startswith("#"):
         return None
+
+    # Denial checks first (regardless of allowlist)
     for pat, reason in _DENY_RES:
         if pat.search(stripped):
             return reason
@@ -55,17 +77,26 @@ def _check_line(line: str) -> str | None:
     for pat, reason in _DENY_RES:
         if pat.search(lower):
             return reason
-    # Allowlist: must start with allowed prefix
-    ok = any(stripped.startswith(pref) for pref in ALLOW_PREFIXES)
-    if not ok:
-        return "command not on allowlist (only docker/echo/sleep/comments for demo)"
-    # Extra: block kubectl exec to prod-like (PDF example)
+
+    # Block dangerous systemctl subcommands specifically
+    if stripped.startswith("systemctl"):
+        if re.search(r"systemctl\s+(disable|mask|stop|daemon-reload|kill)", stripped):
+            return "systemctl disable/stop/kill/mask blocked — only restart/start/status/reload allowed"
+
+    # Block dangerous AWS operations
+    if stripped.startswith("aws"):
+        if re.search(r"aws\s+(iam|sts|s3\s+rb|ec2\s+terminate|ec2\s+delete)", stripped):
+            return "dangerous AWS operation blocked (IAM/STS/terminate/delete not permitted)"
+
+    # Block kubectl exec to production
     if re.search(r"kubectl\s+exec", stripped):
         return "kubectl exec blocked by policy"
-    if "rm -rf" in stripped and "/tmp" not in stripped:
-        # allow only very narrow rm if needed — block broad rm
-        if re.search(r"rm\s+-rf\s+/", stripped):
-            return "recursive delete under / blocked"
+
+    # Check allowlist
+    ok = any(stripped.startswith(pref) for pref in ALLOW_PREFIXES)
+    if not ok:
+        return f"command not on allowlist — allowed: docker, echo, sleep, aws ec2/cloudwatch/logs, systemctl restart/start/status"
+
     return None
 
 

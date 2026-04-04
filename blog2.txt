@@ -1,0 +1,40 @@
+﻿backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.4:52044 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.3:39350 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.5:39888 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.3:39350 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.3:39350 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.4:33294 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.4:33296 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.3:45386 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.5:57578 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.3:45386 - "POST /ingest HTTP/1.1" 200 OK
