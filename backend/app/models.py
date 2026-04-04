@@ -93,3 +93,12 @@ class IncidentQueryRequest(BaseModel):
 
 class IncidentQueryResponse(BaseModel):
     answer: str
+
+class PostMortemRequest(BaseModel):
+    """Payload to trigger post-mortem generation and email."""
+    incident_description: str
+    analysis: str
+    runbook: str
+    output: str
+    start_time: str
+    end_time: str
