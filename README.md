@@ -47,6 +47,8 @@ flowchart TB
   F -->|POST /ingest| BE
 ```
 
+**Build your own demo site (real logs → Live Telemetry):** [docs/AGENT_DEMO_WEBSITE.md](docs/AGENT_DEMO_WEBSITE.md) describes the `LogEvent` contract, `LOG_INGEST_URL`, optional `INGEST_SECRET`, and points to the reference implementations under `services/`.
+
 ---
 
 ## Prerequisites

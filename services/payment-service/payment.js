@@ -23,6 +23,7 @@ const payments = new client.Counter({
 });
 
 const LOG_URL = process.env.LOG_INGEST_URL || "";
+const INGEST_SECRET = process.env.INGEST_SECRET || "";
 const SERVICE = "payment-service";
 const FAIL_MODE = process.env.FAIL_MODE === "1";
 
@@ -36,9 +37,11 @@ function log(level, message, extra = {}) {
   };
   console.log(JSON.stringify(payload));
   if (LOG_URL) {
+    const headers = { "Content-Type": "application/json" };
+    if (INGEST_SECRET) headers["X-Ingest-Secret"] = INGEST_SECRET;
     fetch(LOG_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(payload),
     }).catch(() => {});
   }

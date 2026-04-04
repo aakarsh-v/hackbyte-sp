@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -146,8 +146,21 @@ async def broadcast_log(event: LogEvent) -> None:
 # Ingest
 # ---------------------------------------------------------------------------
 
+async def verify_ingest_secret(
+    x_ingest_secret: str | None = Header(default=None, alias="X-Ingest-Secret"),
+) -> None:
+    expected = os.environ.get("INGEST_SECRET", "").strip()
+    if not expected:
+        return
+    if x_ingest_secret != expected:
+        raise HTTPException(status_code=401, detail="invalid or missing ingest secret")
+
+
 @app.post("/ingest")
-async def ingest_one(event: LogEvent) -> dict[str, str]:
+async def ingest_one(
+    event: LogEvent,
+    _auth: None = Depends(verify_ingest_secret),
+) -> dict[str, str]:
     state.log_buffer.append(event)
     try:
         await append_log_event(event)
@@ -160,7 +173,10 @@ async def ingest_one(event: LogEvent) -> dict[str, str]:
 
 
 @app.post("/ingest/batch")
-async def ingest_batch(batch: LogIngestBatch) -> dict[str, Any]:
+async def ingest_batch(
+    batch: LogIngestBatch,
+    _auth: None = Depends(verify_ingest_secret),
+) -> dict[str, Any]:
     for e in batch.events:
         try:
             await append_log_event(e)

@@ -23,6 +23,7 @@ const loginAttempts = new client.Counter({
 });
 
 const LOG_URL = process.env.LOG_INGEST_URL || "";
+const INGEST_SECRET = process.env.INGEST_SECRET || "";
 const SERVICE = "auth-service";
 
 function log(level, message, extra = {}) {
@@ -35,9 +36,11 @@ function log(level, message, extra = {}) {
   });
   console.log(line);
   if (LOG_URL) {
+    const headers = { "Content-Type": "application/json" };
+    if (INGEST_SECRET) headers["X-Ingest-Secret"] = INGEST_SECRET;
     fetch(LOG_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({
         time: new Date().toISOString(),
         service: SERVICE,
