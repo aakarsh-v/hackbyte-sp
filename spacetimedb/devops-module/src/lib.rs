@@ -1,12 +1,12 @@
-//! DevOps AI — SpacetimeDB module: log buffer + per-session runbook state.
+//! DevOps AI — SpacetimeDB module: log buffer + per-session runbook history.
 
 use spacetimedb::{ReducerContext, Table};
 
 /// Matches `LOG_BUFFER_MAX` default in the FastAPI app.
 const LOG_BUFFER_MAX: usize = 2000;
 
-#[spacetimedb::table(accessor = log_event, public)]
-pub struct LogEvent {
+#[spacetimedb::table(name = "logs", accessor = logs, public)]
+pub struct LogRow {
     #[primary_key]
     #[auto_inc]
     pub id: u64,
@@ -18,8 +18,12 @@ pub struct LogEvent {
     pub extra_json: String,
 }
 
-#[spacetimedb::table(accessor = session_runbook, public)]
-pub struct SessionRunbook {
+#[spacetimedb::table(
+    name = "session_runbook_history",
+    accessor = session_runbook_history,
+    public
+)]
+pub struct SessionRunbookHistory {
     #[primary_key]
     #[auto_inc]
     pub id: u64,
@@ -29,7 +33,7 @@ pub struct SessionRunbook {
 }
 
 fn trim_old_logs(ctx: &ReducerContext) {
-    let rows: Vec<_> = ctx.db.log_event().iter().collect();
+    let rows: Vec<_> = ctx.db.logs().iter().collect();
     if rows.len() <= LOG_BUFFER_MAX {
         return;
     }
@@ -37,7 +41,7 @@ fn trim_old_logs(ctx: &ReducerContext) {
     ids.sort_unstable();
     let drop = ids.len() - LOG_BUFFER_MAX;
     for id in ids.into_iter().take(drop) {
-        ctx.db.log_event().id().delete(id);
+        ctx.db.logs().id().delete(id);
     }
 }
 
@@ -50,7 +54,7 @@ pub fn ingest_log(
     message: String,
     extra_json: String,
 ) {
-    ctx.db.log_event().insert(LogEvent {
+    ctx.db.logs().insert(LogRow {
         id: 0,
         time,
         service,
@@ -61,14 +65,15 @@ pub fn ingest_log(
     trim_old_logs(ctx);
 }
 
+/// Appends one row per call. Primary key is `id` (auto-inc), not `session_id`.
 #[spacetimedb::reducer]
-pub fn upsert_session_runbook(
+pub fn append_session_runbook(
     ctx: &ReducerContext,
     session_id: String,
     last_sanitized: String,
     last_sanitized_hash: String,
 ) {
-    ctx.db.session_runbook().insert(SessionRunbook {
+    ctx.db.session_runbook_history().insert(SessionRunbookHistory {
         id: 0,
         session_id,
         last_sanitized,

@@ -79,7 +79,7 @@ async def fetch_log_tail(limit: int) -> list[LogEvent]:
     c = _client()
     r = await c.post(
         f"/v1/database/{_database_name()}/sql",
-        content=b"SELECT * FROM log_event",
+        content=b"SELECT * FROM logs",
         headers={"Content-Type": "text/plain"},
     )
     r.raise_for_status()
@@ -92,7 +92,7 @@ async def fetch_log_tail(limit: int) -> list[LogEvent]:
     return [row_to_log_event(row) for row in tail]
 
 
-async def upsert_session_runbook(
+async def append_session_runbook(
     *,
     session_id: str,
     last_sanitized: str,
@@ -102,7 +102,7 @@ async def upsert_session_runbook(
     body = json.dumps([session_id, last_sanitized, last_sanitized_hash])
     c = _client()
     r = await c.post(
-        f"/v1/database/{dbn}/call/upsert_session_runbook",
+        f"/v1/database/{dbn}/call/append_session_runbook",
         content=body.encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
@@ -274,8 +274,8 @@ async def get_session_runbook(session_id: str) -> tuple[str | None, str | None]:
     c = _client()
     esc = _escape_sql_string(session_id)
     attempts = [
-        f"SELECT * FROM session_runbook WHERE session_id = '{esc}' ORDER BY id DESC LIMIT 1",
-        f"SELECT * FROM session_runbook WHERE session_id = '{esc}'",
+        f"SELECT * FROM session_runbook_history WHERE session_id = '{esc}' ORDER BY id DESC LIMIT 1",
+        f"SELECT * FROM session_runbook_history WHERE session_id = '{esc}'",
     ]
     rows: list[list[Any]] | None = None
     for sql in attempts:

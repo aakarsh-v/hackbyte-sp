@@ -56,7 +56,7 @@ function wsLogsUrl() {
 }
 
 export function App() {
-  const [sessionId] = useState(() => getOrCreateSessionId());
+  const [sessionId, setSessionId] = useState(() => getOrCreateSessionId());
   const [logs, setLogs] = useState<string[]>([]);
   const [incident, setIncident] = useState(
     "PaymentService returns 503; CPU high on payment-service."
@@ -139,6 +139,24 @@ export function App() {
     setImageMime("image/png");
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
     setImagePreviewUrl(null);
+  };
+
+  const startNewSession = () => {
+    try {
+      const id = crypto.randomUUID();
+      localStorage.setItem(SESSION_STORAGE_KEY, id);
+      setSessionId(id);
+    } catch {
+      const fallback = "00000000-0000-0000-0000-000000000001";
+      setSessionId(fallback);
+    }
+    setApprovedHash(null);
+    setExecOut(["New incident session — run Analyze to draft a runbook, then Approve → Execute."]);
+    setSanitized("");
+    setSanitizedHash(null);
+    setBlocked([]);
+    setAnalysis("");
+    setRawRunbook("");
   };
 
   const runAnalyze = async () => {
@@ -303,6 +321,23 @@ export function App() {
       <p style={{ color: "var(--muted)", fontSize: "0.9rem", marginTop: 0 }}>
         Live logs · Gemini analysis · VeriGuard policy · approve → execute
       </p>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: "0.75rem",
+          marginBottom: "0.75rem",
+          fontSize: "0.85rem",
+        }}
+      >
+        <span style={{ color: "var(--muted)" }}>
+          Session <code title={sessionId}>{sessionId.slice(0, 8)}…{sessionId.slice(-4)}</code>
+        </span>
+        <button type="button" onClick={startNewSession} disabled={execBusy}>
+          New incident session
+        </button>
+      </div>
 
       <div className="grid">
         <div className="panel">

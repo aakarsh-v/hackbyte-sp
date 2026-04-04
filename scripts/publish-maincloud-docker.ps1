@@ -1,7 +1,7 @@
 # Publish spacetimedb/devops-module to Maincloud using the official Linux image (no local MSVC/Rust).
 # Prerequisite: `spacetime login` on Windows so %LOCALAPPDATA%\SpacetimeDB\config\cli.toml exists.
 # Usage: from repo root: .\scripts\publish-maincloud-docker.ps1
-# Optional: $env:SPACETIME_DATABASE = "devopsai" (default)
+# Optional: $env:SPACETIME_DATABASE = "devopsai" (default). Maincloud: avoid underscores in the name.
 
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
@@ -17,4 +17,4 @@ docker run --rm `
   -v "${cfg}:/home/spacetime/.config/spacetime" `
   -w /module `
   clockworklabs/spacetime:latest `
-  publish $db --server maincloud -y
+  publish $db --server maincloud -y --delete-data

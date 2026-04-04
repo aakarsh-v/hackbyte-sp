@@ -31,7 +31,7 @@ from .persistence import (
     fetch_log_tail,
     get_session_runbook,
     set_http_client,
-    upsert_session_runbook,
+    append_session_runbook,
 )
 from .policy import hash_content, parse_executable_lines, preview_policy
 from .prometheus_snapshot import build_metrics_snapshot
@@ -211,7 +211,7 @@ async def analyze(
         ANALYZE_REQUESTS.labels(result="fallback").inc()
     sanitized = "\n".join(preview.sanitized_lines)
     sid = normalize_session_id(x_session_id)
-    await upsert_session_runbook(
+    await append_session_runbook(
         session_id=sid,
         last_sanitized=sanitized,
         last_sanitized_hash=h,
@@ -257,7 +257,7 @@ async def approve(
         APPROVE_REQUESTS.labels(result="rejected").inc()
         raise HTTPException(400, "content must match last sanitized runbook from /analyze")
     # Update stored runbook with exactly what operator approved (may have been edited)
-    await upsert_session_runbook(
+    await append_session_runbook(
         session_id=sid,
         last_sanitized=req.content,
         last_sanitized_hash=h,

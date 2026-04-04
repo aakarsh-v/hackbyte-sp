@@ -21,7 +21,7 @@ def patched_persistence(mock_store: dict, monkeypatch: pytest.MonkeyPatch):
         rows = mock_store["logs"]
         return rows[-limit:] if len(rows) > limit else rows
 
-    async def upsert_session_runbook(
+    async def append_session_runbook(
         *,
         session_id: str,
         last_sanitized: str,
@@ -39,7 +39,7 @@ def patched_persistence(mock_store: dict, monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr("app.main.append_log_event", append_log_event)
     monkeypatch.setattr("app.main.fetch_log_tail", fetch_log_tail)
-    monkeypatch.setattr("app.main.upsert_session_runbook", upsert_session_runbook)
+    monkeypatch.setattr("app.main.append_session_runbook", append_session_runbook)
     monkeypatch.setattr("app.main.get_session_runbook", get_session_runbook)
 
 
