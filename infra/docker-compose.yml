@@ -86,6 +86,7 @@ services:
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.0-flash}
       ALLOW_DOCKER_EXEC: ${ALLOW_DOCKER_EXEC:-true}
       LOG_BUFFER_MAX: ${LOG_BUFFER_MAX:-2000}
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:3001}
 
   prometheus:

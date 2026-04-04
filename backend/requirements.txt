@@ -2,6 +2,7 @@ fastapi==0.115.6
 uvicorn[standard]==0.32.1
 pydantic==2.10.3
 google-generativeai==0.8.3
+Pillow==11.0.0
 python-multipart==0.0.17
 httpx==0.28.1
 prometheus-client==0.21.1

@@ -17,6 +17,11 @@ _DENY_RES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"curl\s+[^\n]*\|\s*(ba)?sh"), "curl pipe to shell"),
     (re.compile(r"wget\s+[^\n]*\|\s*(ba)?sh"), "wget pipe to shell"),
     (re.compile(r";\s*rm\s+-rf"), "chained destructive rm"),
+    (re.compile(r"AKIA[0-9A-Z]{16}"), "possible AWS access key in command (no secrets in runbooks)"),
+    (
+        re.compile(r"BEGIN\s+[A-Z0-9 -]*PRIVATE KEY"),
+        "private key material blocked by policy",
+    ),
 ]
 
 # Allowlist prefixes for demo (conservative)

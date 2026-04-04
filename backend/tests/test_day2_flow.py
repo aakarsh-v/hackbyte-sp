@@ -3,6 +3,16 @@ from __future__ import annotations
 from app.policy import hash_content, preview_policy
 
 
+def test_policy_preview_blocks_aws_key_pattern(client):
+    r = client.post(
+        "/policy/preview",
+        json={"script": 'echo leak AKIA0123456789ABCDEF\n'},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["blocked"]) >= 1
+
+
 def test_policy_preview_blocks_dangerous_line(client):
     r = client.post(
         "/policy/preview",

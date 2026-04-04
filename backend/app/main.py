@@ -34,6 +34,7 @@ from .persistence import (
     upsert_session_runbook,
 )
 from .policy import hash_content, parse_executable_lines, preview_policy
+from .prometheus_snapshot import build_metrics_snapshot
 from .session_id import normalize_session_id
 
 LOG_BUFFER_MAX = int(os.environ.get("LOG_BUFFER_MAX", "2000"))
@@ -187,11 +188,20 @@ async def analyze(
     if req.include_logs:
         lines = await fetch_log_tail(400)
         log_excerpt = "\n".join(f"{e.service} [{e.level}] {e.message}" for e in lines)
+    metrics_hint = req.include_metrics_hint or ""
+    if req.include_prometheus_snapshot:
+        prom_base = os.environ.get("PROMETHEUS_URL", "http://prometheus:9090").strip()
+        snap = await build_metrics_snapshot(prom_base)
+        metrics_hint = (
+            f"{metrics_hint}\n\n{snap}".strip() if metrics_hint else snap
+        )
     try:
         analysis, raw_runbook, preview, h = await gemini_client.analyze_and_runbook(
             incident_description=req.incident_description,
             log_excerpt=log_excerpt,
-            metrics_hint=req.include_metrics_hint,
+            metrics_hint=metrics_hint,
+            image_base64=req.image_base64,
+            image_mime_type=req.image_mime_type,
         )
         ANALYZE_REQUESTS.labels(result="ok").inc()
     except Exception:

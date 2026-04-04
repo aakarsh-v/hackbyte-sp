@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 
 const apiBase = import.meta.env.VITE_API_URL || "";
 
@@ -62,6 +62,10 @@ export function App() {
     "PaymentService returns 503; CPU high on payment-service."
   );
   const [metricsHint, setMetricsHint] = useState("");
+  const [includePrometheus, setIncludePrometheus] = useState(false);
+  const [imageBase64, setImageBase64] = useState("");
+  const [imageMime, setImageMime] = useState("image/png");
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState("");
   const [rawRunbook, setRawRunbook] = useState("");
   const [sanitized, setSanitized] = useState("");
@@ -102,6 +106,41 @@ export function App() {
   }, [appendLog]);
 
   // ----- Analyze -----
+  const onImageFile = (e: ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) {
+      setImageBase64("");
+      setImageMime("image/png");
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+      setImagePreviewUrl(null);
+      return;
+    }
+    if (f.size > 5 * 1024 * 1024) {
+      setAnalysis("Image too large (max 5MB).");
+      return;
+    }
+    const mime = f.type || "image/png";
+    setImageMime(mime);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const data = reader.result as string;
+      const b64 = data.includes(",") ? data.split(",")[1]! : data;
+      setImageBase64(b64);
+      setImagePreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(f);
+      });
+    };
+    reader.readAsDataURL(f);
+  };
+
+  const clearImage = () => {
+    setImageBase64("");
+    setImageMime("image/png");
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setImagePreviewUrl(null);
+  };
+
   const runAnalyze = async () => {
     setLoading(true);
     setExecOut([]);
@@ -117,6 +156,9 @@ export function App() {
           incident_description: incident,
           include_logs: true,
           include_metrics_hint: metricsHint,
+          include_prometheus_snapshot: includePrometheus,
+          image_base64: imageBase64,
+          image_mime_type: imageMime,
         }),
       });
       if (!r.ok) throw new Error(await r.text());
@@ -275,6 +317,33 @@ export function App() {
           <textarea value={incident} onChange={(e) => setIncident(e.target.value)} />
           <label style={{ marginTop: "0.75rem" }}>Metrics / notes (optional)</label>
           <textarea value={metricsHint} onChange={(e) => setMetricsHint(e.target.value)} />
+          <label style={{ marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={includePrometheus}
+              onChange={(e) => setIncludePrometheus(e.target.checked)}
+            />
+            <span>Attach live Prometheus snapshot (queries Prometheus from the backend)</span>
+          </label>
+          <label style={{ marginTop: "0.75rem" }}>Screenshot / diagram (optional, max 5MB)</label>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            onChange={onImageFile}
+            style={{ marginTop: "0.25rem" }}
+          />
+          {imagePreviewUrl && (
+            <div style={{ marginTop: "0.5rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              <img
+                src={imagePreviewUrl}
+                alt="Upload preview"
+                style={{ maxHeight: "120px", maxWidth: "100%", borderRadius: "4px", border: "1px solid var(--border, #333)" }}
+              />
+              <button type="button" onClick={clearImage}>
+                Remove image
+              </button>
+            </div>
+          )}
           <div className="actions">
             <button type="button" disabled={execBusy} onClick={runAnalyze}>
               {loading ? "Analyzing…" : "Analyze + runbook (Gemini)"}

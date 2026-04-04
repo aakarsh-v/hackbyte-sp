@@ -27,10 +27,15 @@ def patched_persistence(mock_store: dict, monkeypatch: pytest.MonkeyPatch):
         last_sanitized: str,
         last_sanitized_hash: str,
     ) -> None:
-        mock_store["runbooks"][session_id] = (last_sanitized, last_sanitized_hash)
+        mock_store["runbooks"].setdefault(session_id, []).append(
+            (last_sanitized, last_sanitized_hash)
+        )
 
     async def get_session_runbook(session_id: str) -> tuple[str | None, str | None]:
-        return mock_store["runbooks"].get(session_id, (None, None))
+        hist: list = mock_store["runbooks"].get(session_id) or []
+        if not hist:
+            return None, None
+        return hist[-1]
 
     monkeypatch.setattr("app.main.append_log_event", append_log_event)
     monkeypatch.setattr("app.main.fetch_log_tail", fetch_log_tail)

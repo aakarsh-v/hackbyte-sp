@@ -51,6 +51,54 @@
       ],
       "title": "Auth logins",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 16 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "sum by (job) (up)",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Scrape targets up (by job)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 16 },
+      "id": 5,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "sum by (service, level) (rate(devopsai_logs_ingested_total[5m]))",
+          "legendFormat": "{{service}}/{{level}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Backend logs ingested (rate)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 23 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(devopsai_analyze_requests_total[5m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Backend /analyze requests (rate)",
+      "type": "timeseries"
     }
   ],
   "schemaVersion": 39,

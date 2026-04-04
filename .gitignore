@@ -3,6 +3,7 @@ dist/
 .env
 __pycache__/
 *.pyc
+debug-*.log
 .venv/
 *.egg-info/
 .tmp_pip/
@@ -11,6 +12,11 @@ __pycache__/
 # SpacetimeDB module build artifacts
 spacetimedb/**/target/
 .DS_Store
+
+# Terraform
+.terraform/
+*.tfvars
+.terraform.lock.hcl
 
 # PDF and documents (excluded from GitHub)
 *.pdf
@@ -22,3 +28,4 @@ spacetimedb/**/target/
 *.md
 !README.md
 !docs/SPACETIMEDB.md
+!docs/PDF_VS_IMPLEMENTATION.md

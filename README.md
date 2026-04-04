@@ -2,7 +2,7 @@
 
 AI-augmented DevOps demo: three instrumented services, Prometheus + Grafana, FastAPI backend with Gemini (Google AI Studio) for incident analysis and runbook drafts, policy filtering (VeriGuard-style), and safe `docker` execution.
 
-The stack includes **SpacetimeDB** (standalone in Docker) for persisted log events and **per-session** runbook state (sanitized script + hash). The Rust module in [`spacetimedb/devops-module/`](spacetimedb/devops-module/) defines public tables `log_event` and `session_runbook`, plus reducers `ingest_log` and `upsert_session_runbook`. The FastAPI app talks to SpacetimeDB over its **HTTP API** (`/v1/database/.../call/...` and `/sql`). The web UI sends a stable **`X-Session-Id`** (stored in `localStorage`) on analyze/execute so concurrent operators do not overwrite each other’s runbooks. API clients may omit the header to use the default session id `00000000-0000-0000-0000-000000000001`.
+The stack includes **SpacetimeDB** (standalone in Docker) for persisted log events and **per-session** runbook history (each analyze/approve appends a row; the backend reads the **latest** row per session for approve/execute). The Rust module in [`spacetimedb/devops-module/`](spacetimedb/devops-module/) defines public tables `log_event` and `session_runbook`, plus reducers `ingest_log` and `upsert_session_runbook`. The FastAPI app talks to SpacetimeDB over its **HTTP API** (`/v1/database/.../call/...` and `/sql`). The web UI sends a stable **`X-Session-Id`** (stored in `localStorage`) on analyze/execute so concurrent operators do not overwrite each other’s runbooks. API clients may omit the header to use the default session id `00000000-0000-0000-0000-000000000001`.
 
 **SpacetimeDB (architecture and troubleshooting):** [docs/SPACETIMEDB.md](docs/SPACETIMEDB.md)
 
@@ -134,7 +134,11 @@ You should get **HTTP 200** responses (Prometheus returns JSON with `"status":"s
 1. Open **http://localhost:8000/**.
 2. Optionally open **http://localhost:3001/** and use Login / Pay to generate traffic (or use the `curl` health calls above).
 3. In the console, enter an incident description and click **Analyze + runbook**.
-4. Confirm **blocked** unsafe lines and a **sanitized** script; click **Execute approved runbook** (only allowed `docker` / `echo` / `sleep` lines run).
+4. Optionally enable **Attach live Prometheus snapshot** so the backend fetches instant queries from Prometheus (`PROMETHEUS_URL`, default `http://prometheus:9090` in Compose) and merges them into the metrics context for Gemini.
+5. Optionally attach a **screenshot or diagram** (PNG/JPEG/WebP/GIF, max 5MB) — the model uses it as multimodal context when `GEMINI_API_KEY` is set.
+6. Confirm **blocked** unsafe lines and a **sanitized** script; click **Execute approved runbook** (only allowed `docker` / `echo` / `sleep` lines run).
+
+**Demo scripts (align with the Executive Summary):** replay synthetic logs with `bash scripts/replay-sample-logs.sh` (see [`samples/incident-sample.jsonl`](samples/incident-sample.jsonl)); measure a proxy **MTTR** (time to successful `/analyze`) with `bash scripts/eval-mttr.sh` (optional `INJECT_FAULT=1` with Docker on the host). Mapping of PDF claims to this repo: [docs/PDF_VS_IMPLEMENTATION.md](docs/PDF_VS_IMPLEMENTATION.md). Optional **Terraform** EC2 stub: [infra/terraform/ec2-docker/README.md](infra/terraform/ec2-docker/README.md).
 
 Optional failure demo: [scripts/fault-inject.sh](scripts/fault-inject.sh) or set `FAIL_MODE=1` for `payment-service` in [infra/docker-compose.yml](infra/docker-compose.yml) and recreate that service.
 
@@ -244,12 +248,15 @@ Opens **http://localhost:5173** with a proxy to FastAPI on **8000**. Run the Com
 - `web/` — React console (Vite)
 - `scripts/` — `verify-stack.sh` (full-stack check), `fault-inject.sh`
 - `package.json` (repo root) — **`npm run build:web`**, **`stack:up`**, **`test:unit`**, **`test:e2e`**
+- `samples/` — synthetic incident lines for `scripts/replay-sample-logs.sh`
+- `infra/terraform/ec2-docker/` — optional AWS EC2 + Docker bootstrap (Terraform)
 
 ---
 
 ## Documentation
 
 - **SpacetimeDB:** [docs/SPACETIMEDB.md](docs/SPACETIMEDB.md)
+- **PDF vs implementation:** [docs/PDF_VS_IMPLEMENTATION.md](docs/PDF_VS_IMPLEMENTATION.md)
 
 For a detailed list of what is implemented versus planned work, you can maintain **`IMPLEMENTATION_STATUS.md`** at the repo root locally (gitignored by default; see `.gitignore`).
 

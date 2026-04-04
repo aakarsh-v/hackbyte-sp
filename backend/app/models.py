@@ -32,6 +32,15 @@ class AnalyzeRequest(BaseModel):
     include_metrics_hint: str = ""
     """Optional pasted metric summary or Prometheus query result text."""
 
+    include_prometheus_snapshot: bool = False
+    """When True, backend appends live instant-query results from PROMETHEUS_URL."""
+
+    image_base64: str = ""
+    """Optional base64-encoded image (no data: URL prefix). Sent to Gemini as context."""
+
+    image_mime_type: str = "image/png"
+    """MIME type for the image (e.g. image/png, image/jpeg, image/webp)."""
+
 
 class PolicyViolation(BaseModel):
     line_number: int

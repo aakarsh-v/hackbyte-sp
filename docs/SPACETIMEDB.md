@@ -3,7 +3,7 @@
 This project uses [SpacetimeDB](https://spacetimedb.com/) as the **only** persistence layer for:
 
 1. **`log_event`** — append-only log lines ingested from microservices and replayed to the web UI (`GET /logs`, WebSocket `/ws/logs`).
-2. **`session_runbook`** — last **sanitized** runbook script and its **hash** per `session_id`, aligned with the HTTP header **`X-Session-Id`** so concurrent operators do not clobber each other.
+2. **`session_runbook`** — **append-only** history of sanitized runbook scripts and hashes per `session_id` (aligned with **`X-Session-Id`**). The backend uses the row with the largest **`id`** as the current runbook for `/approve` and `/execute`.
 
 The FastAPI backend does **not** use the legacy Python SDK on PyPI. It uses **`httpx`** against SpacetimeDB’s **HTTP API** (CLI 2.x): `POST /v1/database/{name}/call/{reducer}` and `POST /v1/database/{name}/sql`.
 
@@ -33,12 +33,12 @@ Source: [`spacetimedb/devops-module/src/lib.rs`](../spacetimedb/devops-module/sr
 **Public tables**
 
 - **`log_event`** — `id` (auto-increment primary key), `time`, `service`, `level`, `message`, `extra_json` (JSON string, often `"{}"`).
-- **`session_runbook`** — `session_id` (primary key), `last_sanitized`, `last_sanitized_hash`.
+- **`session_runbook`** — `id` (auto-increment primary key), `session_id`, `last_sanitized`, `last_sanitized_hash`.
 
 **Reducers**
 
 - **`ingest_log(time, service, level, message, extra_json)`** — inserts a row, then trims oldest rows so at most **2000** events remain (constant `LOG_BUFFER_MAX` in Rust; keep in sync with backend `LOG_BUFFER_MAX` env).
-- **`upsert_session_runbook(session_id, last_sanitized, last_sanitized_hash)`** — replaces the row for that session.
+- **`upsert_session_runbook(session_id, last_sanitized, last_sanitized_hash)`** — appends a new row (full history per session).
 
 ---
 
@@ -62,7 +62,7 @@ See also [`.env.example`](../.env.example).
 | `append_log_event` | `POST /v1/database/{db}/call/ingest_log` with JSON array body `[time, service, level, message, extra_json]`. |
 | `fetch_log_tail` | `POST /v1/database/{db}/sql` with body `SELECT * FROM log_event`; rows sorted **in Python** by `id`, then last N taken (SpacetimeDB SQL subset used here does not rely on `ORDER BY` in SQL). |
 | `upsert_session_runbook` | `POST .../call/upsert_session_runbook` with JSON `[session_id, last_sanitized, last_sanitized_hash]`. |
-| `get_session_runbook` | `POST .../sql` with `SELECT * FROM session_runbook WHERE session_id = '...'` (single quotes escaped in Python). |
+| `get_session_runbook` | Tries `SELECT * ... WHERE session_id = '...' ORDER BY id DESC LIMIT 1` first, then falls back to unqualified `SELECT *` if the server returns 400. Maps columns by **session_id** + **64-char hash** when possible; otherwise infers **id** / **sanitized** / **hash**. Picks latest row by **max parsed id**, else **last row** in the result set. |
 
 Lifespan in [`backend/app/main.py`](../backend/app/main.py) constructs an `httpx.AsyncClient` with `base_url=SPACETIME_HTTP_URL` so paths are relative to that base.
 

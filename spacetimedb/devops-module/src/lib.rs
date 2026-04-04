@@ -21,6 +21,8 @@ pub struct LogEvent {
 #[spacetimedb::table(accessor = session_runbook, public)]
 pub struct SessionRunbook {
     #[primary_key]
+    #[auto_inc]
+    pub id: u64,
     pub session_id: String,
     pub last_sanitized: String,
     pub last_sanitized_hash: String,
@@ -66,16 +68,8 @@ pub fn upsert_session_runbook(
     last_sanitized: String,
     last_sanitized_hash: String,
 ) {
-    if ctx
-        .db
-        .session_runbook()
-        .session_id()
-        .find(&session_id)
-        .is_some()
-    {
-        ctx.db.session_runbook().session_id().delete(session_id.clone());
-    }
     ctx.db.session_runbook().insert(SessionRunbook {
+        id: 0,
         session_id,
         last_sanitized,
         last_sanitized_hash,

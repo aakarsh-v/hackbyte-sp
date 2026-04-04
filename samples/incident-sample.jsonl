@@ -1,0 +1,5 @@
+{"time":"2026-04-04T10:00:01Z","service":"auth-service","level":"INFO","message":"User login succeeded for demo-user"}
+{"time":"2026-04-04T10:00:02Z","service":"payment-service","level":"WARN","message":"High latency on /pay p99=850ms"}
+{"time":"2026-04-04T10:00:05Z","service":"payment-service","level":"ERROR","message":"HTTP 503 on /pay — upstream timeout"}
+{"time":"2026-04-04T10:00:06Z","service":"payment-service","level":"ERROR","message":"HTTP 503 on /pay — circuit open"}
+{"time":"2026-04-04T10:00:10Z","service":"frontend-service","level":"INFO","message":"Checkout flow retried twice"}
