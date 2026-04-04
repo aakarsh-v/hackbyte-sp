@@ -6,6 +6,47 @@ The stack includes **SpacetimeDB** (standalone in Docker) for persisted log even
 
 **SpacetimeDB (architecture and troubleshooting):** [docs/SPACETIMEDB.md](docs/SPACETIMEDB.md)
 
+## High-level architecture
+
+The **operator** uses the **React** console (static assets embedded in and served by the **FastAPI** backend on port **8000**). The backend is the control plane: it **ingests logs** from the demo microservices (**auth**, **payment**, **mini-frontend**), persists them and **per-session runbook history** in **SpacetimeDB** over its **HTTP API**, optionally pulls **Prometheus** instant queries for richer **Gemini** prompts, applies **policy** checks, and runs **allowlisted** commands via the **Docker** socket on the host. **Prometheus** scrapes metrics from the backend and demo services; **Grafana** visualizes metrics using Prometheus as a datasource. **Google Gemini** is called over the internet when `GEMINI_API_KEY` is set.
+
+```mermaid
+flowchart TB
+  subgraph operator["Operator"]
+    B["Browser — React UI :8000"]
+  end
+  subgraph core["Core"]
+    BE["FastAPI backend"]
+    ST[("SpacetimeDB")]
+  end
+  subgraph obs["Observability"]
+    PR["Prometheus :9090"]
+    GF["Grafana :3000"]
+  end
+  subgraph demo["Demo microservices"]
+    A["auth :8081"]
+    P["payment :8082"]
+    F["mini-frontend :3001"]
+  end
+  subgraph external["External"]
+    GM["Google Gemini API"]
+    DK["Docker engine"]
+  end
+  B -->|"/analyze, /execute, /ingest"| BE
+  BE -->|HTTP API| ST
+  BE -->|optional snapshot| PR
+  BE --> GM
+  BE --> DK
+  GF -->|datasource| PR
+  PR -->|scrape /metrics| BE
+  PR -->|scrape /metrics| A
+  PR -->|scrape /metrics| P
+  PR -->|scrape /metrics| F
+  A -->|POST /ingest| BE
+  P -->|POST /ingest| BE
+  F -->|POST /ingest| BE
+```
+
 ---
 
 ## Prerequisites
