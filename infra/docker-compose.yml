@@ -52,7 +52,7 @@ services:
     environment:
       LOG_INGEST_URL: http://backend:8000/ingest
       INGEST_SECRET: ${INGEST_SECRET:-}
-      FAIL_MODE: "0"
+      FAIL_MODE: ${FAIL_MODE:-0}
 
   frontend-service:
     build:
@@ -90,7 +90,7 @@ services:
       ALLOW_DOCKER_EXEC: ${ALLOW_DOCKER_EXEC:-true}
       LOG_BUFFER_MAX: ${LOG_BUFFER_MAX:-2000}
       PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:3001}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:3001}
       INGEST_SECRET: ${INGEST_SECRET:-}
       CW_LOG_GROUP: ${CW_LOG_GROUP:-}
       CW_POLL_INTERVAL_S: ${CW_POLL_INTERVAL_S:-15}

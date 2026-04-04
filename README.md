@@ -313,7 +313,7 @@ Add **`-v`** to remove volumes if you need a clean SpacetimeDB state (destructiv
 cd web && npm ci && npm run dev
 ```
 
-Opens **http://localhost:5173** with a proxy to FastAPI on **8000**. Run the Compose stack (or at least backend + dependencies) so API calls succeed. Ensure **`CORS_ORIGINS`** in `.env` / Compose includes `http://localhost:5173` (see `.env.example`).
+**Why this differs from http://localhost:8000:** the backend serves the **built** React app (`web/dist`) and the API on **one origin** (production-style). `npm run dev` runs the **Vite** dev server instead (hot reload); it defaults to **5173** and, if that port is taken, uses the next free port (often **5174**). Vite **proxies** API and WebSocket paths to FastAPI on **8000**, so behavior matches as long as the backend is running and **`CORS_ORIGINS`** lists your Vite origin (5173, 5174, etc. — see `.env.example`).
 
 **Backend without Docker:** run a local SpacetimeDB (`spacetime start` from the [CLI](https://spacetimedb.com/docs)), publish the module (`cd spacetimedb/devops-module && spacetime publish devopsai`), set `SPACETIME_HTTP_URL=http://127.0.0.1:3000` and `SPACETIME_DATABASE=devopsai`, then from `backend/`: `pip install -r requirements.txt` and `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` (with `web` built or `VITE_API_URL` pointing at this API).
 

@@ -132,7 +132,12 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="DevOps AI Platform API", version="0.2.0", lifespan=lifespan)
 
-_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")
+_default_cors = (
+    "http://localhost:5173,http://127.0.0.1:5173,"
+    "http://localhost:5174,http://127.0.0.1:5174,"
+    "http://localhost:3001"
+)
+_origins = os.environ.get("CORS_ORIGINS", _default_cors).split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in _origins if o.strip()],
