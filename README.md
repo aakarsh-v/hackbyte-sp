@@ -363,4 +363,4 @@ For a detailed list of what is implemented versus planned work, you can maintain
 
 - Builds **`web/`**, runs **pytest** in **`backend/`**, runs a small **policy import** smoke check, **builds** Compose images, and in a separate job starts the **full Compose stack** and runs **`scripts/verify-stack.sh`** (with `WAIT_SECS=1200`).
 
-Optional: add a repository secret **`GEMINI_API_KEY`** so CI’s running backend can call Gemini during the E2E job.
+Optional: add a repository secret **`GEMINI_API_KEY`** so CI’s running backend can call Gemini during the E2E job....
