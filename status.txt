@@ -1,0 +1,8 @@
+﻿NAME               IMAGE                            COMMAND                  SERVICE            CREATED        STATUS                 PORTS
+auth-service       infra-auth-service               "docker-entrypoint.sΓÇª"   auth-service       8 hours ago    Up 8 hours             0.0.0.0:8081->8080/tcp
+backend            infra-backend                    "uvicorn app.main:apΓÇª"   backend            2 hours ago    Up 2 hours             0.0.0.0:8000->8000/tcp
+frontend-service   infra-frontend-service           "docker-entrypoint.sΓÇª"   frontend-service   8 hours ago    Up 8 hours             0.0.0.0:3001->8080/tcp
+grafana            grafana/grafana:11.4.0           "/run.sh"                grafana            8 hours ago    Up 8 hours             0.0.0.0:3002->3000/tcp
+payment-service    infra-payment-service            "docker-entrypoint.sΓÇª"   payment-service    8 hours ago    Up 6 hours             0.0.0.0:8082->8080/tcp
+prometheus         prom/prometheus:v2.55.1          "/bin/prometheus --cΓÇª"   prometheus         11 hours ago   Up 11 hours            0.0.0.0:9090->9090/tcp
+spacetime          clockworklabs/spacetime:latest   "spacetime start --lΓÇª"   spacetime          8 hours ago    Up 8 hours (healthy)   0.0.0.0:3004->3000/tcp

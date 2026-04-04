@@ -18,6 +18,7 @@ import time
 from datetime import datetime, timezone
 from typing import Callable, Coroutine, Any
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -104,15 +105,9 @@ class CloudWatchPoller:
 
     def start(self) -> None:
         if _cfg_group() is None:
-            logger.info(
-                "CloudWatchPoller: CW_LOG_GROUP not set — cloud log ingestion disabled. "
-                "Set CW_LOG_GROUP=<your-log-group> to enable."
-            )
+            print("[CloudWatchPoller] CW_LOG_GROUP not set — cloud log ingestion disabled.")
             return
-        logger.info(
-            "CloudWatchPoller: starting — group=%s region=%s interval=%.0fs",
-            _cfg_group(), _cfg_region(), _cfg_interval(),
-        )
+        print(f"[CloudWatchPoller] ✅ STARTING — group={_cfg_group()} region={_cfg_region()} interval={_cfg_interval():.0f}s")
         self._stop.clear()
         self._task = asyncio.create_task(self._run(), name="cw-poller")
 
@@ -147,7 +142,7 @@ class CloudWatchPoller:
 
         while not self._stop.is_set():
             try:
-                new_start = await asyncio.to_thread(
+                parsed_events, new_start = await asyncio.to_thread(
                     self._poll_once,
                     client,
                     log_group,
@@ -157,10 +152,15 @@ class CloudWatchPoller:
                 )
                 if new_start > start_time_ms:
                     start_time_ms = new_start
+                # Process events on the async side (no event loop issues)
+                for ev in parsed_events:
+                    await self._on_event(
+                        ev["service"], ev["level"], ev["time"], ev["message"], {"stream": ev["stream"]}
+                    )
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.warning("CloudWatchPoller: poll error — %s", exc)
+                print(f"[CloudWatchPoller] ⚠️ poll error: {exc}")
 
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=interval)
@@ -168,7 +168,7 @@ class CloudWatchPoller:
             except asyncio.TimeoutError:
                 pass  # normal — keep looping
 
-        logger.info("CloudWatchPoller: stopped.")
+        print("[CloudWatchPoller] stopped.")
 
     # ------------------------------------------------------------------ #
 
@@ -180,45 +180,38 @@ class CloudWatchPoller:
         start_time_ms: int,
         max_events: int,
     ) -> int:
-        """Blocking boto3 call (runs in thread pool). Returns new start_time_ms."""
+        """Blocking boto3 call (runs in thread pool). Returns (parsed_events, newest_ts)."""
         kwargs: dict[str, Any] = {
             "logGroupName": log_group,
             "startTime": start_time_ms + 1,  # exclusive
             "limit": max_events,
-            "startFromHead": True,
         }
         if stream_prefix:
             kwargs["logStreamNamePrefix"] = stream_prefix
 
         resp = client.filter_log_events(**kwargs)
-        events = resp.get("events", [])
+        raw_events = resp.get("events", [])
 
-        if not events:
-            return start_time_ms
+        if not raw_events:
+            return [], start_time_ms
 
+        parsed: list[dict] = []
         newest_ts = start_time_ms
-        for evt in events:
+        for evt in raw_events:
             ts_ms: int = evt.get("timestamp", 0)
             message: str = evt.get("message", "").strip()
             stream: str = evt.get("logStreamName", "")
             if not message:
                 continue
 
-            # Build a coroutine and schedule it on the event loop
             service = _infer_service(stream, log_group)
             level = _infer_level(message)
             dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
             time_str = dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
-            asyncio.get_event_loop().call_soon_threadsafe(
-                lambda svc=service, lv=level, ts=time_str, msg=message, st=stream: (
-                    asyncio.ensure_future(
-                        self._on_event(svc, lv, ts, msg, {"stream": st})
-                    )
-                )
-            )
+            parsed.append({"service": service, "level": level, "time": time_str, "message": message, "stream": stream})
             if ts_ms > newest_ts:
                 newest_ts = ts_ms
 
-        logger.debug("CloudWatchPoller: ingested %d events from %s", len(events), log_group)
-        return newest_ts
+        print(f"[CloudWatchPoller] ✅ Ingested {len(parsed)} events from {log_group}")
+        return parsed, newest_ts

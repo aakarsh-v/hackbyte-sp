@@ -69,6 +69,7 @@ class AppState:
         self.ws_clients: list[WebSocket] = []
         self.metrics_events: int = 0
         self.cw_poller: CloudWatchPoller | None = None
+        self.log_buffer: "collections.deque" = __import__("collections").deque(maxlen=2000)
 
 
 state = AppState()
@@ -138,7 +139,11 @@ async def broadcast_log(event: LogEvent) -> None:
 
 @app.post("/ingest")
 async def ingest_one(event: LogEvent) -> dict[str, str]:
-    await append_log_event(event)
+    state.log_buffer.append(event)
+    try:
+        await append_log_event(event)
+    except Exception as exc:
+        print(f"[persistence] SpacetimeDB write skipped: {exc}")
     state.metrics_events += 1
     LOGS_INGESTED.labels(service=event.service, level=event.level).inc()
     await broadcast_log(event)
@@ -148,7 +153,10 @@ async def ingest_one(event: LogEvent) -> dict[str, str]:
 @app.post("/ingest/batch")
 async def ingest_batch(batch: LogIngestBatch) -> dict[str, Any]:
     for e in batch.events:
-        await append_log_event(e)
+        try:
+            await append_log_event(e)
+        except Exception as exc:
+            print(f"[persistence] SpacetimeDB write skipped: {exc}")
         state.metrics_events += 1
         LOGS_INGESTED.labels(service=e.service, level=e.level).inc()
         await broadcast_log(e)
@@ -161,7 +169,11 @@ async def ingest_batch(batch: LogIngestBatch) -> dict[str, Any]:
 
 @app.get("/logs")
 async def get_logs(limit: int = 500) -> dict[str, Any]:
-    items = await fetch_log_tail(min(limit, LOG_BUFFER_MAX))
+    try:
+        items = await fetch_log_tail(min(limit, LOG_BUFFER_MAX))
+    except Exception as exc:
+        print(f"[persistence] /logs SpacetimeDB read failed, using memory: {exc}")
+        items = list(state.log_buffer)[-min(limit, LOG_BUFFER_MAX):]
     return {"events": [e.model_dump() for e in items]}
 
 
@@ -170,7 +182,10 @@ async def ws_logs(ws: WebSocket) -> None:
     await ws.accept()
     state.ws_clients.append(ws)
     try:
-        events = await fetch_log_tail(200)
+        try:
+            events = await fetch_log_tail(200)
+        except Exception:
+            events = list(state.log_buffer)[-200:]
         for e in events:
             await ws.send_text(e.model_dump_json())
         while True:
@@ -205,7 +220,10 @@ async def analyze(
 ) -> GeminiAnalysisResponse:
     log_excerpt = ""
     if req.include_logs:
-        lines = await fetch_log_tail(400)
+        try:
+            lines = await fetch_log_tail(400)
+        except Exception:
+            lines = list(state.log_buffer)[-400:]
         log_excerpt = "\n".join(f"{e.service} [{e.level}] {e.message}" for e in lines)
     try:
         analysis, raw_runbook, preview, h = await gemini_client.analyze_and_runbook(
@@ -221,11 +239,14 @@ async def analyze(
         ANALYZE_REQUESTS.labels(result="fallback").inc()
     sanitized = "\n".join(preview.sanitized_lines)
     sid = normalize_session_id(x_session_id)
-    await upsert_session_runbook(
-        session_id=sid,
-        last_sanitized=sanitized,
-        last_sanitized_hash=h,
-    )
+    try:
+        await upsert_session_runbook(
+            session_id=sid,
+            last_sanitized=sanitized,
+            last_sanitized_hash=h,
+        )
+    except Exception as exc:
+        print(f"[persistence] upsert_session_runbook skipped: {exc}")
     return GeminiAnalysisResponse(
         analysis=analysis,
         raw_runbook=raw_runbook,
@@ -257,7 +278,10 @@ async def approve(
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
 ) -> dict[str, Any]:
     sid = normalize_session_id(x_session_id)
-    last_sanitized, last_hash = await get_session_runbook(sid)
+    try:
+        last_sanitized, last_hash = await get_session_runbook(sid)
+    except Exception:
+        last_sanitized, last_hash = None, None
     h = hash_content(req.content)
     if h != req.content_hash:
         APPROVE_REQUESTS.labels(result="rejected").inc()
@@ -267,11 +291,14 @@ async def approve(
         APPROVE_REQUESTS.labels(result="rejected").inc()
         raise HTTPException(400, "content must match last sanitized runbook from /analyze")
     # Update stored runbook with exactly what operator approved (may have been edited)
-    await upsert_session_runbook(
-        session_id=sid,
-        last_sanitized=req.content,
-        last_sanitized_hash=h,
-    )
+    try:
+        await upsert_session_runbook(
+            session_id=sid,
+            last_sanitized=req.content,
+            last_sanitized_hash=h,
+        )
+    except Exception as exc:
+        print(f"[persistence] approve upsert skipped: {exc}")
     APPROVE_REQUESTS.labels(result="ok").inc()
     return {"status": "approved", "hash": h}
 
@@ -286,7 +313,10 @@ async def execute(
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
 ) -> ExecuteResponse:
     sid = normalize_session_id(x_session_id)
-    last_sanitized, last_hash = await get_session_runbook(sid)
+    try:
+        last_sanitized, last_hash = await get_session_runbook(sid)
+    except Exception:
+        last_sanitized, last_hash = req.content, req.content_hash
     h = hash_content(req.content)
     if not last_hash or h != req.content_hash:
         EXECUTE_REQUESTS.labels(result="error").inc()
@@ -320,7 +350,10 @@ async def execute_stream(
     x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
 ) -> StreamingResponse:
     sid = normalize_session_id(x_session_id)
-    last_sanitized, last_hash = await get_session_runbook(sid)
+    try:
+        last_sanitized, last_hash = await get_session_runbook(sid)
+    except Exception:
+        last_sanitized, last_hash = req.content, req.content_hash
     h = hash_content(req.content)
     if not last_hash or h != req.content_hash:
         raise HTTPException(400, "invalid or missing approval hash — call /approve first")

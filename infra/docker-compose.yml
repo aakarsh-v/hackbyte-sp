@@ -87,6 +87,11 @@ services:
       ALLOW_DOCKER_EXEC: ${ALLOW_DOCKER_EXEC:-true}
       LOG_BUFFER_MAX: ${LOG_BUFFER_MAX:-2000}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:3001}
+      CW_LOG_GROUP: ${CW_LOG_GROUP:-}
+      CW_POLL_INTERVAL_S: ${CW_POLL_INTERVAL_S:-15}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
 
   prometheus:
     image: prom/prometheus:v2.55.1
@@ -102,11 +107,13 @@ services:
     image: grafana/grafana:11.4.0
     container_name: grafana
     ports:
-      - "3000:3000"
+      - "3002:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro

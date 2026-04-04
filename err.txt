@@ -1,0 +1,50 @@
+﻿backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.3:47410 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.4:59922 - "POST /ingest HTTP/1.1" 200 OK
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.3:47410 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.3:46180 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.5:53770 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.3:46166 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.4:59870 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.4:59870 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.3:46166 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.5:48234 - "POST /ingest HTTP/1.1" 200 OK
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.3:46166 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.3:46166 - "POST /ingest HTTP/1.1" 200 OK
+backend  | INFO:httpx:HTTP Request: POST https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log "HTTP/1.1 500 Internal Server Error"
+backend  | [persistence] SpacetimeDB write skipped: Server error '500 Internal Server Error' for url 'https://maincloud.spacetimedb.com/v1/database/devopsai/call/ingest_log'
+backend  | For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500
+backend  | INFO:     172.18.0.4:40970 - "POST /ingest HTTP/1.1" 200 OK
