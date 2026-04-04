@@ -28,6 +28,7 @@ from .models import (
     LogEvent,
     LogIngestBatch,
     PolicyPreviewResponse,
+    PostMortemRequest,
 )
 from .persistence import (
     append_log_event,
@@ -40,6 +41,8 @@ from .persistence import (
 from .policy import hash_content, parse_executable_lines, preview_policy
 from .prometheus_snapshot import build_metrics_snapshot
 from .session_id import normalize_session_id
+from .postmortem import create_post_mortem_pdf, send_post_mortem_email
+from .anomaly_poller import start_anomaly_poller
 
 LOG_BUFFER_MAX = int(os.environ.get("LOG_BUFFER_MAX", "2000"))
 
@@ -110,8 +113,18 @@ async def lifespan(_app: FastAPI):
     state.cw_poller = poller
     poller.start()
 
+    # Start Anomaly Poller
+    async def _anomaly_broadcast(batch: LogIngestBatch) -> None:
+        for e in batch.events:
+            state.metrics_events += 1
+            LOGS_INGESTED.labels(service=e.service, level=e.level).inc()
+            await broadcast_log(e)
+
+    anomaly_task = asyncio.create_task(start_anomaly_poller(_anomaly_broadcast))
+
     yield
 
+    anomaly_task.cancel()
     poller.stop()
     set_http_client(None)
     await client.aclose()
@@ -464,6 +477,36 @@ async def execute_stream(
 
 
 # ---------------------------------------------------------------------------
+# Post-Mortem
+# ---------------------------------------------------------------------------
+
+@app.post("/post-mortem")
+async def generate_post_mortem(req: PostMortemRequest) -> dict[str, Any]:
+    data = req.model_dump()
+    try:
+        # Wrap the sync PDF generation and email sending
+        pdf_bytes = await asyncio.to_thread(create_post_mortem_pdf, data)
+        
+        # Save a copy locally so the user can easily find it
+        _here = os.path.dirname(os.path.abspath(__file__))
+        _pm_dir = os.path.join(os.path.dirname(_here), "post_mortems")
+        os.makedirs(_pm_dir, exist_ok=True)
+        
+        basename = f"post_mortem_{int(asyncio.get_event_loop().time())}.pdf"
+        filepath = os.path.join(_pm_dir, basename)
+        
+        with open(filepath, "wb") as f:
+            f.write(pdf_bytes)
+            
+        to_email = "jyotiradityatripathi67@gmail.com"
+        success = await asyncio.to_thread(send_post_mortem_email, to_email, pdf_bytes, req.incident_description)
+        return {"status": "ok", "email_sent": success, "file_path": f"post_mortems/{basename}"}
+    except Exception as exc:
+        print(f"[postmortem] Error: {exc}")
+        return {"status": "error", "detail": str(exc), "email_sent": False}
+
+
+# ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 
@@ -476,6 +519,12 @@ async def health() -> dict[str, str]:
 # Static UI: Docker uses /app/app + ../web/dist; local dev uses backend/app + ../../web/dist
 # ---------------------------------------------------------------------------
 _here = os.path.dirname(os.path.abspath(__file__))
+
+# Mount the post_mortems folder first, so we don't catch it with the broad / route
+_post_mortems_dir = os.path.join(os.path.dirname(_here), "post_mortems")
+os.makedirs(_post_mortems_dir, exist_ok=True)
+app.mount("/post_mortems", StaticFiles(directory=_post_mortems_dir), name="post_mortems")
+
 for _rel in (("..", "web", "dist"), ("..", "..", "web", "dist")):
     _web_dist = os.path.abspath(os.path.join(_here, *_rel))
     if os.path.isdir(_web_dist):

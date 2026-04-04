@@ -14,6 +14,8 @@ export default defineConfig({
       "/logs": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/policy": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/health": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/post-mortem": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      "/post_mortems": { target: "http://127.0.0.1:8000", changeOrigin: true },
     },
   },
 });

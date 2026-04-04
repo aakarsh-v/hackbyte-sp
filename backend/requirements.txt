@@ -9,3 +9,4 @@ prometheus-client==0.21.1
 pytest==8.3.4
 pytest-asyncio==0.25.2
 boto3==1.34.162
+fpdf2==2.8.1

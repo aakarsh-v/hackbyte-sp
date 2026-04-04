@@ -10,6 +10,9 @@ import {
   CheckCircle2,
   Database,
   MessageSquare,
+  Bot,
+  FileText,
+  Download,
 } from "lucide-react";
 
 // @ts-ignore
@@ -61,7 +64,7 @@ function wsLogsUrl() {
 }
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<"sandbox" | "grafana" | "prometheus" | "api">(
+  const [activeTab, setActiveTab] = useState<"sandbox" | "grafana" | "prometheus" | "api" | "query" | "postmortem">(
     "sandbox",
   );
   const [sessionId, setSessionId] = useState(() => getOrCreateSessionId());
@@ -89,6 +92,12 @@ export function App() {
   const [nlAnswer, setNlAnswer] = useState("");
   const [nlLoading, setNlLoading] = useState(false);
   const [includeRunbookHints, setIncludeRunbookHints] = useState(true);
+  const [incidentStartTime, setIncidentStartTime] = useState<string | null>(null);
+  
+  // Post-Mortem specific state
+  const [pmGenerating, setPmGenerating] = useState(false);
+  const [pmResult, setPmResult] = useState<{file_path: string, email_sent: boolean} | null>(null);
+  const [pmError, setPmError] = useState<string | null>(null);
 
   const revalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const logBoxRef = useRef<HTMLPreElement>(null);
@@ -170,12 +179,18 @@ export function App() {
     setBlocked([]);
     setAnalysis("");
     setRawRunbook("");
+    setIncidentStartTime(null);
+    setPmResult(null);
+    setPmError(null);
   };
 
   const runAnalyze = async () => {
     setLoading(true);
     setExecOut([]);
     setApprovedHash(null);
+    if (!incidentStartTime) {
+      setIncidentStartTime(new Date().toLocaleString());
+    }
     try {
       const r = await fetch(`${apiBase}/analyze`, {
         method: "POST",
@@ -305,7 +320,15 @@ export function App() {
           if (line.startsWith("data: ")) {
             try {
               const evt = JSON.parse(line.slice(6));
-              if (evt.type === "output") setExecOut((prev) => [...prev, evt.data]);
+              if (evt.type === "output") {
+                setExecOut((prev) => {
+                  const newOut = [...prev, evt.data];
+                  return newOut;
+                });
+              } else if (evt.type === "done") {
+                // Done event, we don't automatically trigger PM anymore
+                setExecOut((prev) => [...prev, "✈️ Sandbox execution finished. You can now generate a Post-Mortem from the sidebar."]);
+              }
             } catch {
               /* ignore */
             }
@@ -316,6 +339,42 @@ export function App() {
       setExecOut([String(e)]);
     } finally {
       setStreaming(false);
+    }
+  };
+
+  const triggerPostMortem = async () => {
+    setPmGenerating(true);
+    setPmResult(null);
+    setPmError(null);
+    try {
+      const endTime = new Date().toLocaleString();
+      const finalOutput = termBoxRef.current?.innerText || execOut.join("\n") || "No output recorded.";
+      
+      const r = await fetch(`${apiBase}/post-mortem`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          incident_description: incident,
+          analysis: analysis || "No AI analysis performed.",
+          runbook: sanitized || rawRunbook || "No runbook generated.",
+          output: finalOutput,
+          start_time: incidentStartTime || "Unknown",
+          end_time: endTime
+        }),
+      });
+      
+      if (!r.ok) throw new Error(await r.text());
+      const data = await r.json();
+      
+      if (data.status === "ok") {
+        setPmResult({ file_path: data.file_path, email_sent: data.email_sent });
+      } else {
+        throw new Error(data.detail || "Unknown backend error");
+      }
+    } catch (e) {
+      setPmError(String(e));
+    } finally {
+      setPmGenerating(false);
     }
   };
 
@@ -434,64 +493,6 @@ export function App() {
         </div>
       </div>
 
-      <div className="glass-panel" style={{ marginTop: "1rem" }}>
-        <div className="panel-header">
-          <MessageSquare size={16} /> Ask your logs (natural language)
-        </div>
-        <p
-          style={{
-            fontSize: "0.85rem",
-            color: "var(--muted, #888)",
-            marginBottom: "0.75rem",
-            lineHeight: 1.45,
-          }}
-        >
-          Answers use the same stored log excerpt as the backend (plus optional recent runbook
-          snippets). Questions about fix duration or MTTR need timestamps in the logs; approved
-          runbook history has no per-row timing in the database.
-        </p>
-        <label className="input-label">Your question</label>
-        <textarea
-          value={nlQuestion}
-          onChange={(e) => setNlQuestion(e.target.value)}
-          placeholder='e.g. "How many payment-service errors appear in the recent logs?"'
-          style={{ minHeight: "88px", marginBottom: "0.5rem", width: "100%" }}
-        />
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.5rem",
-            cursor: "pointer",
-            marginBottom: "0.75rem",
-            fontSize: "0.9rem",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={includeRunbookHints}
-            onChange={(e) => setIncludeRunbookHints(e.target.checked)}
-          />
-          <span>Include recent runbook hints (truncated)</span>
-        </label>
-        <button
-          type="button"
-          className="btn primary"
-          disabled={nlLoading || !nlQuestion.trim()}
-          onClick={runIncidentQuery}
-          style={{ marginBottom: "0.75rem" }}
-        >
-          {nlLoading ? "Thinking…" : "Ask"}
-        </button>
-        {nlAnswer && (
-          <pre
-            className="terminal stream-sys"
-            style={{ whiteSpace: "pre-wrap", maxHeight: "280px", overflow: "auto" }}
-          >
-            {nlAnswer}
-          </pre>
-        )}
-      </div>
 
       {(analysis || rawRunbook) && (
         <div className="grid-2">
@@ -619,6 +620,147 @@ export function App() {
     </div>
   );
 
+  const renderQuery = () => (
+    <div className="content-scroll">
+      <div className="glass-panel" style={{ maxWidth: "800px", margin: "0 auto 1.5rem" }}>
+        <div className="panel-header" style={{ fontSize: "1rem", marginBottom: "1.25rem" }}>
+          <MessageSquare size={18} style={{ color: "var(--accent-blue)" }} />
+          <span style={{ color: "var(--text-primary)" }}>Ask your logs (natural language)</span>
+        </div>
+        <p
+          style={{
+            fontSize: "0.9rem",
+            color: "var(--text-secondary)",
+            marginBottom: "1.25rem",
+            lineHeight: 1.6,
+            background: "rgba(58,134,255,0.06)",
+            border: "1px solid rgba(58,134,255,0.15)",
+            borderRadius: "8px",
+            padding: "0.85rem 1rem",
+          }}
+        >
+          <Bot size={14} style={{ display: "inline", verticalAlign: "middle", marginRight: "0.4rem", color: "var(--accent-blue)" }} />
+          Answers use the same stored log excerpt as the backend (plus optional recent runbook
+          snippets). Questions about fix duration or MTTR need timestamps in the logs;
+          approved runbook history has no per-row timing in the database.
+        </p>
+
+        <label className="input-label">Your question</label>
+        <textarea
+          value={nlQuestion}
+          onChange={(e) => setNlQuestion(e.target.value)}
+          placeholder='e.g. "How many payment-service errors appear in the recent logs?"'
+          style={{ minHeight: "120px", marginBottom: "0.75rem", width: "100%" }}
+        />
+
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            cursor: "pointer",
+            marginBottom: "1rem",
+            fontSize: "0.9rem",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={includeRunbookHints}
+            onChange={(e) => setIncludeRunbookHints(e.target.checked)}
+          />
+          <span>Include recent runbook hints (truncated)</span>
+        </label>
+
+        <button
+          type="button"
+          className="btn primary"
+          disabled={nlLoading || !nlQuestion.trim()}
+          onClick={runIncidentQuery}
+          style={{ marginBottom: "1rem", width: "100%", padding: "1rem", fontSize: "1rem" }}
+        >
+          <MessageSquare size={18} />
+          {nlLoading ? "Thinking…" : "Ask"}
+        </button>
+
+        {nlAnswer && (
+          <div>
+            <div className="panel-header" style={{ marginTop: "0.5rem" }}>
+              <Bot size={14} /> AI RESPONSE
+            </div>
+            <pre
+              className="terminal stream-sys"
+              style={{ whiteSpace: "pre-wrap", maxHeight: "400px", overflow: "auto" }}
+            >
+              {nlAnswer}
+            </pre>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderPostMortem = () => (
+    <div className="content-scroll">
+      <div className="glass-panel" style={{ maxWidth: "800px", margin: "0 auto" }}>
+        <div className="panel-header" style={{ fontSize: "1rem", marginBottom: "1.25rem" }}>
+          <FileText size={18} style={{ color: "var(--accent-blue)" }} />
+          <span style={{ color: "var(--text-primary)" }}>Generate Incident Post-Mortem</span>
+        </div>
+        
+        <p style={{ color: "var(--text-secondary)", fontSize: "0.9rem", marginBottom: "1.5rem", lineHeight: 1.6 }}>
+          Automatically generate a detailed PDF report containing the incident timeline, root cause analysis, 
+          the executed runbook, and the final telemetry output. The report will be emailed to configured recipients.
+        </p>
+
+        <div style={{ background: "rgba(0,0,0,0.2)", padding: "1.5rem", borderRadius: "8px", marginBottom: "1.5rem", border: "1px solid var(--border-color)" }}>
+          <h4 style={{ color: "var(--text-primary)", marginBottom: "1rem", fontSize: "0.9rem", textTransform: "uppercase" }}>Incident Context to be Included:</h4>
+          <ul style={{ listStyleType: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.75rem", fontSize: "0.9rem", color: "var(--text-secondary)" }}>
+            <li><strong>Start Time:</strong> {incidentStartTime || "Not recorded yet (Run Analysis)"}</li>
+            <li><strong>AI Analysis:</strong> {analysis ? "Captured ✅" : "Missing ❌"}</li>
+            <li><strong>Fix Applied:</strong> {sanitized || rawRunbook ? "Captured ✅" : "Missing ❌"}</li>
+            <li><strong>Execution Output:</strong> {execOut.length > 0 ? "Captured ✅" : "Missing ❌"}</li>
+          </ul>
+        </div>
+
+        <button
+          className="btn primary"
+          style={{ width: "100%", padding: "1rem", fontSize: "1rem", marginBottom: "1.5rem" }}
+          onClick={triggerPostMortem}
+          disabled={pmGenerating}
+        >
+          <FileText size={18} />
+          {pmGenerating ? "Generating & Sending..." : "Generate Post-Mortem Report"}
+        </button>
+
+        {pmResult && (
+          <div style={{ padding: "1.25rem", background: "rgba(0, 230, 118, 0.1)", border: "1px solid var(--accent-green)", borderRadius: "8px", color: "var(--text-primary)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "1rem", color: "var(--accent-green)", fontWeight: 600 }}>
+              <CheckCircle2 size={20} />
+              Report Successfully Generated!
+            </div>
+            
+            <ul style={{ listStyleType: "none", display: "flex", flexDirection: "column", gap: "0.5rem", fontSize: "0.9rem", marginBottom: "1.5rem" }}>
+              <li><strong>Local File Saved:</strong> <code>backend/{pmResult.file_path}</code></li>
+              <li><strong>Email Notification:</strong> {pmResult.email_sent ? "Sent successfully to jyotiradityatripathi67@gmail.com" : "Skipped/Failed (Check terminal logs for SMTP errors)"}</li>
+            </ul>
+
+            <a href={`${apiBase}/${pmResult.file_path.replace("post_mortems/", "post_mortems/")}`} download target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>
+              <button className="btn success" style={{ width: "auto" }}>
+                <Download size={16} /> Download PDF
+              </button>
+            </a>
+          </div>
+        )}
+
+        {pmError && (
+          <div style={{ padding: "1rem", background: "rgba(255, 51, 102, 0.1)", border: "1px solid var(--accent-red)", borderRadius: "8px", color: "var(--accent-red)", fontSize: "0.9rem" }}>
+            <strong>Error:</strong> {pmError}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="app-container">
       <div className="sidebar">
@@ -632,6 +774,18 @@ export function App() {
             onClick={() => setActiveTab("sandbox")}
           >
             <Terminal className="nav-icon" /> SuperPlane Sandbox
+          </button>
+          <button
+            className={`nav-btn ${activeTab === "query" ? "active" : ""}`}
+            onClick={() => setActiveTab("query")}
+          >
+            <MessageSquare className="nav-icon" /> Ask your logs
+          </button>
+          <button
+            className={`nav-btn ${activeTab === "postmortem" ? "active" : ""}`}
+            onClick={() => setActiveTab("postmortem")}
+          >
+            <FileText className="nav-icon" /> Post-Mortem Report
           </button>
           <button
             className={`nav-btn ${activeTab === "grafana" ? "active" : ""}`}
@@ -658,6 +812,8 @@ export function App() {
         <div className="top-nav">
           <div className="top-title">
             {activeTab === "sandbox" && "Secure Execution Engine"}
+            {activeTab === "query" && "Ask Your Logs — Natural Language Query"}
+            {activeTab === "postmortem" && "Automated Incident Post-Mortems"}
             {activeTab === "grafana" && "Grafana Observability Suite"}
             {activeTab === "prometheus" && "Prometheus Time Series Metrics Engine"}
             {activeTab === "api" && "System API Specifications"}
@@ -665,6 +821,8 @@ export function App() {
         </div>
 
         {activeTab === "sandbox" && renderSandbox()}
+        {activeTab === "query" && renderQuery()}
+        {activeTab === "postmortem" && renderPostMortem()}
         {activeTab === "grafana" && (
           <iframe
             className="iframe-container"
