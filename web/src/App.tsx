@@ -93,7 +93,9 @@ export function App() {
   const [nlLoading, setNlLoading] = useState(false);
   const [includeRunbookHints, setIncludeRunbookHints] = useState(true);
   const [incidentStartTime, setIncidentStartTime] = useState<string | null>(null);
-  
+  const [pauseAutoContext, setPauseAutoContext] = useState(false);
+  const pauseAutoContextRef = useRef(false);
+
   // Post-Mortem specific state
   const [pmGenerating, setPmGenerating] = useState(false);
   const [pmResult, setPmResult] = useState<{file_path: string, email_sent: boolean} | null>(null);
@@ -116,10 +118,25 @@ export function App() {
   }, [execOut, activeTab]);
 
   useEffect(() => {
+    pauseAutoContextRef.current = pauseAutoContext;
+  }, [pauseAutoContext]);
+
+  useEffect(() => {
     const ws = new WebSocket(wsLogsUrl());
     ws.onmessage = (ev) => {
       try {
-        const e: LogEvent = JSON.parse(ev.data as string);
+        const raw = JSON.parse(ev.data as string) as Record<string, unknown>;
+        if (
+          raw &&
+          raw.type === "incident_context" &&
+          typeof raw.text === "string"
+        ) {
+          if (!pauseAutoContextRef.current) {
+            setIncident(raw.text);
+          }
+          return;
+        }
+        const e = raw as unknown as LogEvent;
         appendLog(`[${e.service}] ${e.level}: ${e.message}`);
       } catch {
         appendLog(String(ev.data));
@@ -422,6 +439,23 @@ export function App() {
           <div className="panel-header">
             <Cpu size={16} /> INCIDENT CONTEXT
           </div>
+          <label
+            style={{
+              marginBottom: "0.5rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              cursor: "pointer",
+              fontSize: "0.85rem",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={pauseAutoContext}
+              onChange={(e) => setPauseAutoContext(e.target.checked)}
+            />
+            <span>Pause auto context (Gemini/heuristic every N logs via WebSocket)</span>
+          </label>
           <label className="input-label">Operator Description</label>
           <textarea
             value={incident}

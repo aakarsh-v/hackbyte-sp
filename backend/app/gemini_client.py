@@ -6,7 +6,7 @@ import io
 import os
 import re
 
-from .models import PolicyPreviewResponse
+from .models import LogEvent, PolicyPreviewResponse
 from .policy import hash_content, preview_policy
 
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -65,6 +65,88 @@ def _extract_analysis(text: str) -> str:
     """Split off the analysis portion (before the code block)."""
     parts = re.split(r"```(?:bash|sh)?\s*\n", text, maxsplit=1)
     return parts[0].strip() if len(parts) > 1 else text.strip()
+
+
+def compress_log_lines_for_prompt(
+    events: list[LogEvent], *, max_lines: int, max_msg_len: int
+) -> str:
+    """Compact one line per event for token-efficient incident-context prompts."""
+    if max_lines < 1:
+        return ""
+    tail = events[-max_lines:]
+    lines: list[str] = []
+    for e in tail:
+        msg = (e.message or "").replace("\n", " ").replace("|", "/").strip()
+        if len(msg) > max_msg_len:
+            msg = msg[: max_msg_len - 1] + "…"
+        lvl = (e.level or "INFO").upper()
+        lines.append(f"{e.time}|{e.service}|{lvl}|{msg}")
+    return "\n".join(lines)
+
+
+def heuristic_incident_context(compressed: str) -> str:
+    """Short incident blurb when GEMINI_API_KEY is unset (demo-friendly, no API cost)."""
+    rows = [ln for ln in compressed.splitlines() if ln.strip()]
+    if not rows:
+        return "[Auto context] No log lines yet. Ingest logs to build incident context."
+
+    services: set[str] = set()
+    err = warn = 0
+    themes: list[str] = []
+    for ln in rows:
+        parts = ln.split("|", 3)
+        if len(parts) >= 3:
+            services.add(parts[1])
+            lvl = parts[2].upper()
+            if lvl in ("ERROR", "FATAL", "CRITICAL"):
+                err += 1
+            elif lvl == "WARN" or lvl == "WARNING":
+                warn += 1
+        low = ln.lower()
+        if "503" in low or "502" in low or "bad gateway" in low:
+            themes.append("upstream/gateway errors")
+        if "timeout" in low or "timed out" in low:
+            themes.append("timeouts")
+        if "connection refused" in low or "unavailable" in low:
+            themes.append("connectivity failures")
+        if "circuit" in low:
+            themes.append("circuit breaker")
+        if "pool" in low and "exhaust" in low:
+            themes.append("connection pool pressure")
+        if "oom" in low or "137" in low or "killed" in low:
+            themes.append("OOM/process kill")
+
+    svc_list = ", ".join(sorted(services)[:8])
+    if len(services) > 8:
+        svc_list += f", +{len(services) - 8} more"
+    theme_s = "; ".join(dict.fromkeys(themes)) if themes else "general service activity"
+
+    return (
+        f"[Auto context — heuristic, no Gemini] Recent activity across {len(services)} service(s): {svc_list}. "
+        f"In this window: {err} error-level line(s), {warn} warning-level line(s). "
+        f"Themes: {theme_s}. Set GEMINI_API_KEY for AI-written incident narrative."
+    )
+
+
+async def summarize_for_incident_context(compressed: str) -> str:
+    """
+    3–5 sentence incident description for the Analyze text box.
+    Token-efficient: caller passes pre-compressed lines only.
+    """
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
+        return heuristic_incident_context(compressed)
+
+    prompt = f"""You are an on-call SRE. Below are COMPRESSED production log lines (format: time|service|LEVEL|message).
+Write a concise incident description (3 to 5 sentences) for an "Incident context" text box before root-cause analysis.
+Name specific services and failure types seen in the lines. Do not write a runbook or shell commands.
+Plain text only, no markdown, no bullet list.
+
+LOG LINES:
+{compressed or "(empty)"}
+"""
+    text = await asyncio.to_thread(_sync_generate, prompt)
+    return (text or "").strip() or heuristic_incident_context(compressed)
 
 
 async def analyze_and_runbook(

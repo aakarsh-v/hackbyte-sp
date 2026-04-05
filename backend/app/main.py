@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
@@ -74,6 +75,11 @@ INCIDENT_QUERY = Counter(
     "Total /incident-query requests",
     ["result"],  # "ok" | "fallback"
 )
+INCIDENT_CONTEXT_REFRESH = Counter(
+    "devopsai_incident_context_refresh_total",
+    "Auto incident-context refresh attempts",
+    ["result"],  # "ok" | "fallback" | "error" | "skipped_interval"
+)
 
 
 class AppState:
@@ -82,6 +88,9 @@ class AppState:
         self.metrics_events: int = 0
         self.cw_poller: CloudWatchPoller | None = None
         self.log_buffer: "collections.deque" = __import__("collections").deque(maxlen=2000)
+        self.ingest_count_for_context: int = 0
+        self.last_context_refresh_monotonic: float = 0.0
+        self.incident_context_lock: asyncio.Lock = asyncio.Lock()
 
 
 state = AppState()
@@ -104,10 +113,12 @@ async def lifespan(_app: FastAPI):
     ) -> None:
         from .models import LogEvent
         event = LogEvent(time=time, service=service, level=level, message=message, extra=extra)
+        state.log_buffer.append(event)
         await append_log_event(event)
         state.metrics_events += 1
         LOGS_INGESTED.labels(service=service, level=level).inc()
         await broadcast_log(event)
+        schedule_incident_context_refresh()
 
     poller = CloudWatchPoller(on_event=_cw_on_event)
     state.cw_poller = poller
@@ -116,9 +127,11 @@ async def lifespan(_app: FastAPI):
     # Start Anomaly Poller
     async def _anomaly_broadcast(batch: LogIngestBatch) -> None:
         for e in batch.events:
+            state.log_buffer.append(e)
             state.metrics_events += 1
             LOGS_INGESTED.labels(service=e.service, level=e.level).inc()
             await broadcast_log(e)
+            schedule_incident_context_refresh()
 
     anomaly_task = asyncio.create_task(start_anomaly_poller(_anomaly_broadcast))
 
@@ -160,6 +173,73 @@ async def broadcast_log(event: LogEvent) -> None:
             state.ws_clients.remove(ws)
 
 
+async def broadcast_incident_context(text: str) -> None:
+    """Push AI/heuristic incident summary to all WebSocket clients (JSON envelope)."""
+    dead: list[WebSocket] = []
+    payload = json.dumps({"type": "incident_context", "text": text})
+    for ws in state.ws_clients:
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        if ws in state.ws_clients:
+            state.ws_clients.remove(ws)
+
+
+def schedule_incident_context_refresh() -> None:
+    """Call after each ingested log line; runs Gemini/heuristic every N ingests."""
+    state.ingest_count_for_context += 1
+    every = int(os.environ.get("INCIDENT_CONTEXT_EVERY_N", "30"))
+    if every < 1:
+        return
+    if state.ingest_count_for_context % every != 0:
+        return
+    asyncio.create_task(maybe_refresh_incident_context())
+
+
+async def maybe_refresh_incident_context() -> None:
+    min_s = float(os.environ.get("INCIDENT_CONTEXT_MIN_INTERVAL_S", "45"))
+    now = time.monotonic()
+    if (
+        state.last_context_refresh_monotonic > 0
+        and (now - state.last_context_refresh_monotonic) < min_s
+    ):
+        INCIDENT_CONTEXT_REFRESH.labels(result="skipped_interval").inc()
+        return
+
+    async with state.incident_context_lock:
+        now2 = time.monotonic()
+        if (
+            state.last_context_refresh_monotonic > 0
+            and (now2 - state.last_context_refresh_monotonic) < min_s
+        ):
+            INCIDENT_CONTEXT_REFRESH.labels(result="skipped_interval").inc()
+            return
+
+        max_lines = int(os.environ.get("INCIDENT_CONTEXT_MAX_LINES", "45"))
+        max_lines = max(1, min(max_lines, LOG_BUFFER_MAX))
+        max_msg = int(os.environ.get("INCIDENT_CONTEXT_MAX_MSG_LEN", "140"))
+        events = list(state.log_buffer)[-max_lines:]
+        compressed = gemini_client.compress_log_lines_for_prompt(
+            events, max_lines=max_lines, max_msg_len=max_msg
+        )
+        try:
+            text = await gemini_client.summarize_for_incident_context(compressed)
+            if os.environ.get("GEMINI_API_KEY", "").strip():
+                INCIDENT_CONTEXT_REFRESH.labels(result="ok").inc()
+            else:
+                INCIDENT_CONTEXT_REFRESH.labels(result="fallback").inc()
+        except Exception as exc:
+            print(f"[incident-context] {exc}")
+            INCIDENT_CONTEXT_REFRESH.labels(result="error").inc()
+            text = gemini_client.heuristic_incident_context(compressed)
+
+        state.last_context_refresh_monotonic = time.monotonic()
+
+    await broadcast_incident_context(text)
+
+
 # ---------------------------------------------------------------------------
 # Ingest
 # ---------------------------------------------------------------------------
@@ -187,6 +267,7 @@ async def ingest_one(
     state.metrics_events += 1
     LOGS_INGESTED.labels(service=event.service, level=event.level).inc()
     await broadcast_log(event)
+    schedule_incident_context_refresh()
     return {"status": "ok"}
 
 
@@ -196,6 +277,7 @@ async def ingest_batch(
     _auth: None = Depends(verify_ingest_secret),
 ) -> dict[str, Any]:
     for e in batch.events:
+        state.log_buffer.append(e)
         try:
             await append_log_event(e)
         except Exception as exc:
@@ -203,6 +285,7 @@ async def ingest_batch(
         state.metrics_events += 1
         LOGS_INGESTED.labels(service=e.service, level=e.level).inc()
         await broadcast_log(e)
+        schedule_incident_context_refresh()
     return {"status": "ok", "count": len(batch.events)}
 
 

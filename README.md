@@ -382,6 +382,8 @@ cd web && npm ci && npm run dev
 - `POST /execute` — `{ "content", "content_hash" }` matching the last sanitized runbook for that session; same **`X-Session-Id`** as analyze
 - `POST /incident-query` — `{ "question", "log_limit"?, "include_runbook_hints"? }` — natural-language answers **only** from a recent log excerpt (and optional truncated runbook snippets). Requires **`GEMINI_API_KEY`** for full LLM answers; without it, the backend returns a small heuristic summary. **Limitation:** runbook history rows have **no timestamps**, so questions like “time to fix” or “MTTR” cannot be answered unless inferable from **`logs.time`** / message text; set `INCIDENT_QUERY_MAX_LOG_CHARS` (default `120000`) to cap prompt size.
 
+**WebSocket `/ws/logs`** — streams JSON log lines (`LogEvent`) as today. Additionally, after every **`INCIDENT_CONTEXT_EVERY_N`** ingested logs (default **30**), the backend may push a second message shape: `{"type":"incident_context","text":"..."}`. The React console **replaces the INCIDENT CONTEXT** textarea with `text` unless **Pause auto context** is checked. A **minimum interval** between refreshes is enforced (**`INCIDENT_CONTEXT_MIN_INTERVAL_S`**, default **45**) to limit Gemini cost. Without **`GEMINI_API_KEY`**, a compact **heuristic** paragraph is sent instead. Tune **`INCIDENT_CONTEXT_MAX_LINES`** (default 45) and **`INCIDENT_CONTEXT_MAX_MSG_LEN`** (default 140) for prompt size. Metric: `devopsai_incident_context_refresh_total`.
+
 Example:
 
 ```bash
