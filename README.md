@@ -1,53 +1,350 @@
 # DevOps AI Platform
 
-AI-augmented DevOps demo: three instrumented services, Prometheus + Grafana, FastAPI backend with Gemini (Google AI Studio) for incident analysis and runbook drafts, policy filtering (VeriGuard-style), and safe `docker` execution.
+> An AI-powered incident response console that turns live logs and telemetry into root-cause analysis, policy-gated runbooks, and safe automated remediation — powered by **Google Gemini**, **SpacetimeDB**, **Prometheus**, and **Docker**.
 
-The stack includes **SpacetimeDB** (standalone in Docker) for persisted log events and **per-session** runbook history (each analyze/approve inserts a row; the backend reads the **latest** row per session for approve/execute). The Rust module in [`spacetimedb/devops-module/`](spacetimedb/devops-module/) defines public tables **`logs`** and **`session_runbook_history`**, plus reducers `ingest_log` and `append_session_runbook`. The FastAPI app talks to SpacetimeDB over its **HTTP API** (`/v1/database/.../call/...` and `/sql`). The web UI sends a stable **`X-Session-Id`** (stored in `localStorage`) on analyze/execute so concurrent operators do not overwrite each other’s runbooks. API clients may omit the header to use the default session id `00000000-0000-0000-0000-000000000001`.
+Built for HackByte 2026 | Stack: React · TypeScript · FastAPI · Python · Google Gemini API · SpacetimeDB · Prometheus · Grafana · Docker
 
-**SpacetimeDB (architecture and troubleshooting):** [docs/SPACETIMEDB.md](docs/SPACETIMEDB.md)
+---
 
-## High-level architecture
+## What it does
 
-The **operator** uses the **React** console (static assets embedded in and served by the **FastAPI** backend on port **8000**). The backend is the control plane: it **ingests logs** from the demo microservices (**auth**, **payment**, **mini-frontend**), persists them and **per-session runbook history** in **SpacetimeDB** over its **HTTP API**, optionally pulls **Prometheus** instant queries for richer **Gemini** prompts, applies **policy** checks, and runs **allowlisted** commands via the **Docker** socket on the host. **Prometheus** scrapes metrics from the backend and demo services; **Grafana** visualizes metrics using Prometheus as a datasource. **Google Gemini** is called over the internet when `GEMINI_API_KEY` is set.
+1. **Ingests live logs** from instrumented microservices (auth, payment, mini-frontend) in real time over HTTP and WebSocket.
+2. **Automatically summarizes incidents** — every 30 ingested logs, Gemini writes a 3–5 sentence incident narrative and pushes it to every connected operator.
+3. **Analyzes and drafts runbooks on demand** — the operator describes an incident, Gemini produces a root-cause analysis (citing exact log lines, rating severity P1/P2/P3) and a step-by-step bash remediation script.
+4. **Enforces safety before execution** — a policy layer blocks dangerous commands (`rm -rf`, `curl | sh`, etc.), produces a sanitized diff, and requires the operator to approve a SHA-256 hash before anything runs.
+5. **Executes approved runbooks** via the Docker socket — only allowlisted commands (`docker`, `echo`, `sleep`, `aws`, `systemctl`) actually run.
+6. **Answers natural-language questions** over stored logs — "How many payment errors in the last 10 minutes?" is answered by Gemini grounded strictly in the log excerpt.
+7. **Detects anomalies proactively** — a background poller watches Prometheus error-rate metrics and fires a pre-emptive Gemini analysis before a human notices.
+
+---
+
+## Architecture
 
 ```mermaid
 flowchart TB
-  subgraph operator["Operator"]
+  subgraph operator ["Operator"]
     B["Browser — React UI :8000"]
   end
-  subgraph core["Core"]
-    BE["FastAPI backend"]
-    ST[("SpacetimeDB")]
+  subgraph core ["Core"]
+    BE["FastAPI backend :8000"]
+    ST[("SpacetimeDB :3000")]
   end
-  subgraph obs["Observability"]
+  subgraph obs ["Observability"]
     PR["Prometheus :9090"]
     GF["Grafana :3002"]
   end
-  subgraph demo["Demo microservices"]
+  subgraph demo ["Demo microservices"]
     A["auth :8081"]
     P["payment :8082"]
     F["mini-frontend :3001"]
   end
-  subgraph external["External"]
+  subgraph external ["External"]
     GM["Google Gemini API"]
     DK["Docker engine"]
   end
-  B -->|"/analyze, /execute, /ingest"| BE
-  BE -->|HTTP API| ST
-  BE -->|optional snapshot| PR
-  BE --> GM
-  BE --> DK
-  GF -->|datasource| PR
-  PR -->|scrape /metrics| BE
-  PR -->|scrape /metrics| A
-  PR -->|scrape /metrics| P
-  PR -->|scrape /metrics| F
-  A -->|POST /ingest| BE
-  P -->|POST /ingest| BE
-  F -->|POST /ingest| BE
+  B -->|"/analyze, /execute, /incident-query, /ingest"| BE
+  BE -->|"reducer calls + SQL"| ST
+  BE -->|"optional Prometheus snapshot"| PR
+  BE -->|"generate_content()"| GM
+  BE -->|"allowlisted commands"| DK
+  GF -->|"datasource"| PR
+  PR -->|"scrape /metrics"| BE
+  PR -->|"scrape /metrics"| A
+  PR -->|"scrape /metrics"| P
+  PR -->|"scrape /metrics"| F
+  A -->|"POST /ingest"| BE
+  P -->|"POST /ingest"| BE
+  F -->|"POST /ingest"| BE
 ```
 
-**Build your own demo site (real logs → Live Telemetry):** [docs/AGENT_DEMO_WEBSITE.md](docs/AGENT_DEMO_WEBSITE.md) describes the `LogEvent` contract, `LOG_INGEST_URL`, optional `INGEST_SECRET`, and points to the reference implementations under `services/`.
+---
+
+## Key Features
+
+| Feature | What it does | Where it lives |
+|---------|-------------|----------------|
+| **SuperPlane Analysis** | Operator clicks Analyze; Gemini reads logs + metrics + optional screenshot and writes RCA + runbook | `POST /analyze` → `gemini_client.analyze_and_runbook()` |
+| **Auto Incident Context** | Every 30 log ingests, Gemini auto-summarizes active incidents and pushes to all operators via WebSocket | `WebSocket /ws/logs` → `gemini_client.summarize_for_incident_context()` |
+| **Natural-Language Log Q&A** | Ask "how many payment errors?" in plain English; Gemini answers using only stored log text | `POST /incident-query` → `gemini_client.answer_incident_question()` |
+| **Proactive Anomaly Detection** | Background poller checks Prometheus error rate every 30s; auto-triggers Gemini RCA when threshold crossed | `anomaly_poller.py` → `gemini_client.analyze_incident()` |
+| **Policy-Gated Execution** | Every Gemini-generated runbook is sanitized (blocked lines shown), hash-approved by operator, then executed | `backend/app/policy.py` + `POST /execute` |
+| **Per-Session Runbook History** | Each browser tab has a stable UUID session ID; runbooks are stored per-session so concurrent operators do not overwrite each other | SpacetimeDB `session_runbook_history` table |
+| **Multimodal Context** | Operator can attach a Grafana screenshot or architecture diagram; Gemini uses it for visual root-cause analysis | `AnalyzeRequest.image_base64` → `_sync_generate_with_image()` |
+| **Graceful Offline Fallback** | All Gemini paths have local heuristic fallbacks; the full stack works without `GEMINI_API_KEY` set | `heuristic_incident_context()`, `fallback_template()`, `incident_query_fallback()` |
+
+---
+
+## Google Gemini Integration
+
+All Gemini calls are in [`backend/app/gemini_client.py`](backend/app/gemini_client.py).  
+Authentication: `GEMINI_API_KEY` env var → `google.generativeai.configure(api_key=...)` → `GenerativeModel(GEMINI_MODEL)` (default `gemini-2.0-flash`).
+
+### Call 1 — Incident Analysis + Runbook Generation
+
+**Trigger:** Operator clicks "Analyze" in the UI → `POST /analyze`
+
+**Input contract:**
+```
+incident_description  string   Free-text incident summary typed by the operator
+log_excerpt           string   Last 400 log lines (service [level] message, one per line)
+metrics_hint          string   Optional: pasted metrics text or live Prometheus snapshot
+image_base64          string   Optional: base64-encoded PNG/JPEG/WebP/GIF screenshot ≤ 5 MB
+image_mime_type       string   Optional: MIME type of the image (default image/png)
+```
+
+**Prompt intent:** Gemini is asked to act as a "world-class Senior SRE at a Fortune 500 company" and must:
+- Identify exact failing log lines
+- Trace the failure cascade (what broke first → what broke next)
+- Identify root cause (OOM? DB down? 502 gateway? crash loop?)
+- Rate severity: P1 / P2 / P3
+- Generate a specific bash runbook using only allowlisted commands (`docker`, `echo`, `sleep`, `aws`, `systemctl`)
+
+**Output contract:**
+```
+analysis        string                 Technical root-cause paragraph with log citations and severity rating
+raw_runbook     string                 Bash script block extracted from Gemini response
+preview         PolicyPreviewResponse  original_lines, sanitized_lines, blocked[] (line, reason)
+approved_hash   string                 SHA-256 of sanitized_lines — required to call /execute
+```
+
+**What happens next:** The sanitized runbook + hash are stored in SpacetimeDB `session_runbook_history` for the operator's session. Execution is only allowed if the submitted hash matches.
+
+**Fallback (no `GEMINI_API_KEY`):** `fallback_template()` pattern-matches logs for known signals (502, OOM/exit-137, DB connection refused, EC2/systemd) and generates a contextual heuristic runbook — never a generic "restart everything".
+
+---
+
+### Call 2 — Live Incident Context Summarization
+
+**Trigger:** Automatically, every `INCIDENT_CONTEXT_EVERY_N` ingested logs (default **30**), enforced with a minimum `INCIDENT_CONTEXT_MIN_INTERVAL_S` cooldown (default **45 s**) to control API cost.
+
+**Input contract:**
+```
+compressed_logs   string   Last INCIDENT_CONTEXT_MAX_LINES (default 45) log lines,
+                           each formatted as time|service|LEVEL|message,
+                           messages truncated to INCIDENT_CONTEXT_MAX_MSG_LEN (default 140 chars)
+```
+
+**Prompt intent:** Gemini is asked to act as an "on-call SRE" and write a 3–5 sentence incident description for the "Incident Context" text box. Rules: name specific services and failure types seen, no runbook, no markdown, plain text only.
+
+**Output contract:**
+```
+text   string   Plain-text incident narrative pushed to all connected WebSocket clients
+                as {"type": "incident_context", "text": "..."}
+                The React UI replaces the Incident Context textarea unless operator
+                has checked "Pause auto context".
+```
+
+**Fallback:** `heuristic_incident_context()` counts ERROR/WARN lines, identifies themes (timeout, 502, OOM, circuit breaker, connection pool) from keyword scanning, and returns a structured summary without calling the API.
+
+---
+
+### Call 3 — Natural-Language Log Q&A
+
+**Trigger:** Operator types a question in the SuperPlane Sandbox → `POST /incident-query`
+
+**Input contract:**
+```
+question              string   Plain-English question (e.g. "How many payment errors in recent logs?")
+log_excerpt           string   Last log_limit lines (default 600, capped by LOG_BUFFER_MAX),
+                               truncated to INCIDENT_QUERY_MAX_LOG_CHARS (default 120 000 chars)
+runbook_excerpt       string   Optional: recent sanitized runbook rows from SpacetimeDB
+                               (truncated, no timestamps — Gemini is told not to infer MTTR from these)
+```
+
+**Prompt intent:** Gemini must answer **only** from the provided log excerpt. Rules enforced in the prompt:
+- Quote or paraphrase log lines as evidence
+- If the question needs data not in the excerpt (e.g. exact MTTR, time ranges without timestamps), say so explicitly
+- Never invent incident counts or timelines
+
+**Output contract:**
+```
+answer   string   Plain-text natural-language answer grounded in the log excerpt
+```
+
+**Fallback:** `incident_query_fallback()` returns a heuristic count of ERROR/FATAL lines, payment-service mentions, and crash-signal lines, plus a note that `GEMINI_API_KEY` is not set.
+
+---
+
+### Call 4 — Proactive Anomaly Auto-Analysis
+
+**Trigger:** `anomaly_poller.py` runs a background loop every `ANOMALY_POLL_INTERVAL_SEC` (default **30 s**):
+- Queries Prometheus: `sum(rate(http_requests_total{status=~"5.."}[2m])) / sum(rate(http_requests_total[2m]))`
+- If error rate exceeds `ANOMALY_ERROR_THRESHOLD` (default 3%), or with ~15% random probability in simulation mode (`SIMULATE_ANOMALIES=true`)
+
+**Input contract:**
+```
+incident_description   string   Auto-generated: "Payment Service error rate detected at X%, exceeding Y% threshold"
+logs_text              string   Last 80 log lines
+metrics_hint           string   Live Prometheus snapshot text (error rate, request counts)
+```
+
+**Prompt intent:** Same SRE prompt as Call 1 — full RCA + runbook for the detected anomaly.
+
+**Output contract:** Result is broadcast as a `LogEvent` via WebSocket:
+```
+service   "SuperPlane_AI"
+level     "ALERT"
+message   "PRE-EMPTIVE RUNBOOK MAPPED:\n\nRoot Cause: <analysis>\n\nSuggested Fix:\n<runbook>"
+```
+
+**Cooldown:** After firing, the poller waits 6 × 30 s = **3 minutes** before triggering again.
+
+---
+
+### Gemini Call Flow Summary
+
+```mermaid
+flowchart LR
+  subgraph triggers ["Triggers"]
+    T1["POST /analyze\n(operator click)"]
+    T2["Every 30 log ingests\n(automatic)"]
+    T3["POST /incident-query\n(operator question)"]
+    T4["Prometheus anomaly\n(background poller)"]
+  end
+  subgraph gemini ["Gemini calls in gemini_client.py"]
+    G1["analyze_and_runbook()\nRCA + bash runbook"]
+    G2["summarize_for_incident_context()\n3-5 sentence narrative"]
+    G3["answer_incident_question()\nNL answer from logs"]
+    G4["analyze_incident()\nProactive RCA"]
+  end
+  subgraph outputs ["Outputs"]
+    O1["analysis + runbook\n→ SpacetimeDB + UI"]
+    O2["incident context text\n→ WebSocket broadcast"]
+    O3["plain-text answer\n→ UI"]
+    O4["ALERT LogEvent\n→ WebSocket broadcast"]
+  end
+  T1 --> G1 --> O1
+  T2 --> G2 --> O2
+  T3 --> G3 --> O3
+  T4 --> G4 --> O4
+```
+
+---
+
+## SpacetimeDB Integration
+
+SpacetimeDB provides persistent, real-time storage for log events and per-session runbook history.  
+The module is written in **Rust** and compiled to **WASM**: [`spacetimedb/devops-module/src/lib.rs`](spacetimedb/devops-module/src/lib.rs).  
+The FastAPI backend talks to it over **HTTP** (`/v1/database/{name}/call/...` for writes, `/v1/database/{name}/sql` for reads).  
+Python client: [`backend/app/persistence.py`](backend/app/persistence.py).
+
+### Tables
+
+#### `logs`
+
+Stores every ingested log event. Capped at **2000 rows** (oldest deleted automatically on overflow).
+
+```
+Column      Type     Notes
+id          u64      Auto-increment primary key (used for ordering)
+time        String   ISO-8601 timestamp (set by ingest caller)
+service     String   Service name (e.g. "payment", "auth", "SuperPlane_AI")
+level       String   "INFO", "WARN", "ERROR", "CRITICAL", "ALERT"
+message     String   Log message text
+extra_json  String   JSON-serialised extra fields, or "{}"
+```
+
+#### `session_runbook_history`
+
+Stores policy-sanitized runbooks per operator session. **Append-only** — no row is ever updated or deleted.
+
+```
+Column               Type     Notes
+id                   u64      Auto-increment primary key (used to find "latest" for a session)
+session_id           String   UUID — sent by browser as X-Session-Id header (stable per tab)
+last_sanitized       String   Full policy-cleaned bash script text
+last_sanitized_hash  String   SHA-256 hex of last_sanitized — must match to allow /execute
+```
+
+### Reducers (Write Path)
+
+Reducers are Rust functions compiled into the WASM module and called via the SpacetimeDB HTTP API.
+
+#### `ingest_log`
+
+```
+Endpoint:  POST /v1/database/{name}/call/ingest_log
+Body:      JSON array — [time, service, level, message, extra_json]
+Called by: persistence.append_log_event() on every POST /ingest or /ingest/batch
+Effect:    Inserts one LogRow; trims oldest rows if table exceeds LOG_BUFFER_MAX (2000)
+```
+
+#### `append_session_runbook`
+
+```
+Endpoint:  POST /v1/database/{name}/call/append_session_runbook
+Body:      JSON array — [session_id, last_sanitized, last_sanitized_hash]
+Called by: persistence.append_session_runbook() after every successful POST /analyze
+Effect:    Inserts one SessionRunbookHistory row (never updates existing rows)
+```
+
+### SQL Reads
+
+SpacetimeDB accepts raw SQL over `POST /v1/database/{name}/sql` with `Content-Type: text/plain`.
+
+#### `fetch_log_tail(limit)`
+
+```sql
+SELECT * FROM logs
+```
+Python sorts by `id` (ascending), takes the last `limit` rows. Used by:
+- `GET /logs` — returns log history to the UI
+- `WebSocket /ws/logs` — sends last 200 events on connect
+- `POST /analyze` (when `include_logs=true`) — feeds last 400 lines to Gemini
+- `anomaly_poller.py` — feeds last 80 lines to proactive Gemini call
+
+#### `get_session_runbook(session_id)`
+
+```sql
+SELECT * FROM session_runbook_history WHERE session_id = '<uuid>'
+-- falls back to SELECT * if ORDER BY / LIMIT is not supported
+```
+Returns the row with the **highest `id`** for that session (latest runbook). Used by:
+- `POST /execute` — verifies submitted hash matches the approved runbook before running any commands
+
+#### `fetch_recent_runbook_summaries(limit)`
+
+```sql
+SELECT * FROM session_runbook_history
+```
+Returns the last `limit` rows (sorted by id), with each script truncated to 400 chars. Used by:
+- `POST /incident-query` (when `include_runbook_hints=true`) — appended to Gemini's context so it can reference past remediation steps when answering questions
+
+### Why SpacetimeDB
+
+- **Real-time, WASM-native** — the module compiles to WASM and runs inside the SpacetimeDB engine, keeping persistence co-located with the event-streaming runtime
+- **Per-session isolation** — concurrent operators (different `X-Session-Id` values) each have their own runbook history; no shared mutable state between operators
+- **No extra infrastructure** — runs as a single Docker container; no separate database server, no ORM, no migrations
+- **Persists across backend restarts** — logs and runbook history survive backend container restarts without losing data
+
+### SpacetimeDB Data Flow
+
+```mermaid
+flowchart LR
+  subgraph writes ["Write path"]
+    W1["POST /ingest\nor /ingest/batch"]
+    W2["POST /analyze"]
+  end
+  subgraph reducers ["SpacetimeDB reducers (WASM)"]
+    R1["ingest_log()\n→ logs table"]
+    R2["append_session_runbook()\n→ session_runbook_history table"]
+  end
+  subgraph reads ["Read path"]
+    Q1["GET /logs\n/ws/logs connect\n/analyze include_logs\nanomaly poller"]
+    Q2["POST /execute\n(hash verification)"]
+    Q3["POST /incident-query\nrunbook hints"]
+  end
+  subgraph sql ["SpacetimeDB SQL"]
+    S1["SELECT * FROM logs"]
+    S2["SELECT * FROM session_runbook_history\nWHERE session_id = '...'"]
+    S3["SELECT * FROM session_runbook_history"]
+  end
+  W1 --> R1
+  W2 --> R2
+  Q1 --> S1
+  Q2 --> S2
+  Q3 --> S3
+```
 
 ---
 
@@ -65,26 +362,24 @@ flowchart TB
 
 ---
 
-## Quick start — commands to run the program
+## Quick Start
 
-Always run commands from the **repository root** (`E:\hackbyte 1` or your clone). The Compose file is **`infra/docker-compose.yml`**, not in the root folder.
+Always run commands from the **repository root**. The Compose file is **`infra/docker-compose.yml`**, not in the root folder.
 
-**Recommended:** use the **npm scripts** below — they already pass `-f infra/docker-compose.yml` and `--env-file .env`, so you do not need to remember paths.
-
-### Linux, macOS, Git Bash, or WSL
+### Linux / macOS / Git Bash / WSL
 
 ```bash
-# 1) Environment (copy example and optionally edit GEMINI_API_KEY, etc.)
+# 1) Copy environment and optionally set GEMINI_API_KEY
 cp .env.example .env
 
-# 2) Build the web UI (required before Docker build — embeds web/dist in the backend image)
+# 2) Build the React UI (must run before Docker build — embeds web/dist into the backend image)
 npm run build:web
 
-# 3) Start the full stack with local SpacetimeDB (foreground — Ctrl+C stops everything)
+# 3) Start the full stack (foreground — Ctrl+C stops everything)
 npm run stack:up
 ```
 
-**Run in the background** instead of step 3:
+Run in background instead:
 
 ```bash
 npm run stack:up:detached
@@ -92,162 +387,99 @@ npm run stack:up:detached
 
 ### Windows PowerShell
 
-Same steps; use `Copy-Item` if you prefer not to use `cp`:
-
 ```powershell
-cd "E:\hackbyte 1"   # use your actual clone path
+cd "E:\hackbyte 1"
 Copy-Item .env.example .env
 npm run build:web
 npm run stack:up:detached
 ```
 
-If you run **`docker compose` by hand** (not via `npm run`), you **must** point at the compose file or Docker prints `no configuration file provided`:
+Manual Docker Compose (if you prefer not to use npm scripts):
 
 ```powershell
 docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env up -d --build
-docker compose -f infra/docker-compose.yml logs frontend-service --tail 20
-docker compose -f infra/docker-compose.yml --env-file .env down
 ```
 
-Optional one-liner for a session: `$env:COMPOSE_FILE = "infra/docker-compose.yml"` (still use `--profile local-spacetime` when starting the full local stack).
+**Open the app:** [http://localhost:8000/](http://localhost:8000/)
 
-**Then open the app:** [http://localhost:8000/](http://localhost:8000/) (main console). In the **SuperPlane Sandbox** tab, use **Ask your logs (natural language)** to query recent stored logs in plain English (`POST /incident-query`; set `GEMINI_API_KEY` for full answers).
-
-**Stop the stack** (if you used detached mode): `npm run stack:down` (same on bash or PowerShell from the repo root).
-
-**Optional checks** (with the stack running, second terminal):
+**Stop the stack:**
 
 ```bash
-curl -sf http://localhost:8000/health
+npm run stack:down
 ```
-
-For SpacetimeDB **Maincloud** instead of local Docker SpacetimeDB, configure `SPACETIME_HTTP_URL` and `SPACETIME_BEARER_TOKEN` in `.env` per [docs/SPACETIMEDB.md](docs/SPACETIMEDB.md), build the web as above, then:
-
-```bash
-npm run stack:up:maincloud
-```
-
-Details, URLs for all services, and troubleshooting: see **Run the application (step by step)** below.
 
 ---
 
-## Run the application (step by step)
+## Run the Application (Step by Step)
 
 Do this from the **repository root** unless a path is given.
 
 ### 1. Environment file
 
-Copy the example env and edit values as needed:
-
 ```bash
 cp .env.example .env
 ```
 
-- Set **`GEMINI_API_KEY`** in `.env` if you want live Gemini responses ([Google AI Studio](https://aistudio.google.com/apikey)).
-- **`SPACETIME_DATABASE`** must match the name used when publishing the module (default `devopsai`).
-- With **Docker Compose**, the backend container already uses **`SPACETIME_HTTP_URL=http://spacetime:3000`** on the internal network (see `infra/docker-compose.yml`). You normally **do not** set `SPACETIME_HTTP_URL` in `.env` for Compose.
-- For tools on the **host** talking to SpacetimeDB’s published port, use **`http://localhost:3004`** (Compose maps host `3004` → container `3000`).
+- Set **`GEMINI_API_KEY`** in `.env` for live Gemini responses ([Google AI Studio](https://aistudio.google.com/apikey)). Without it, all Gemini paths use local heuristic fallbacks — the app still works fully.
+- **`SPACETIME_DATABASE`** must match the module publish name (default `devopsai`).
+- With Docker Compose, `SPACETIME_HTTP_URL` is already set to `http://spacetime:3000` inside the container; do not override it in `.env` for Compose.
+- Host tools talking to SpacetimeDB use `http://localhost:3004` (Compose maps host 3004 → container 3000).
 
 ### 2. Build the web console
-
-The backend Docker image **embeds** `web/dist`, so you must build the UI **before** building or starting the stack:
 
 ```bash
 npm run build:web
 ```
 
-Equivalent manual commands:
-
-```bash
-cd web && npm ci && npm run build && cd ..
-```
-
-If `npm run build:web` fails, install Node 20+ and retry.
+The backend Docker image embeds `web/dist`, so you must build the UI before building or starting the stack.
 
 ### 3. Start the stack
 
-**Embedded local SpacetimeDB** (default `npm` scripts — publishes the Rust module inside Docker):
-
-**Foreground** (logs in the terminal; Ctrl+C stops the stack):
+**Local SpacetimeDB (default):**
 
 ```bash
-npm run stack:up
+npm run stack:up           # foreground
+npm run stack:up:detached  # background
 ```
 
-**Detached** (containers run in the background):
-
-```bash
-npm run stack:up:detached
-```
-
-Equivalent manual command:
-
-```bash
-docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env up --build
-```
-
-Add `-d` for detached mode.
-
-**SpacetimeDB Maincloud** instead of local containers: set `SPACETIME_HTTP_URL` and `SPACETIME_BEARER_TOKEN` in `.env` (see [docs/SPACETIMEDB.md](docs/SPACETIMEDB.md)), then start **without** the `local-spacetime` profile:
+**SpacetimeDB Maincloud:** set `SPACETIME_HTTP_URL` and `SPACETIME_BEARER_TOKEN` in `.env` (see [docs/SPACETIMEDB.md](docs/SPACETIMEDB.md)), then:
 
 ```bash
 npm run stack:up:maincloud
 ```
 
-### 3b. Rebuild demo microservices (auth, payment, frontend)
-
-The Node services under `services/` are **baked into Docker images** at build time. After you change their code, **rebuild and recreate** those containers or the UI will keep showing old log text (e.g. `simulated login`).
-
-From the **repository root**:
+### 3b. Rebuild demo microservices after code changes
 
 ```bash
 docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env build auth-service payment-service frontend-service
 docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env up -d --force-recreate auth-service payment-service frontend-service
 ```
 
-**Windows PowerShell** (same paths):
-
-```powershell
-docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env build auth-service payment-service frontend-service
-docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env up -d --force-recreate auth-service payment-service frontend-service
-```
-
-If you use **Maincloud** (no `local-spacetime` profile), omit `--profile local-spacetime` on both lines.
-
 ### 4. What to expect on first start
 
-**If using embedded local SpacetimeDB** (`--profile local-spacetime`):
-
 1. **SpacetimeDB** starts and passes its healthcheck.
-2. **`st-init`** runs once: `spacetime publish` for `spacetimedb/devops-module`. The **first** run can take **several minutes** (Rust → WASM compile). Later starts are faster if build caches exist.
-3. **`backend`** starts after **`st-init`** completes (when those services are enabled).
-
-**If using Maincloud**, there is no local `spacetime` / `st-init`; the backend connects to `https://maincloud.spacetimedb.com` — publish the module to Maincloud first.
-
+2. **`st-init`** runs `spacetime publish` for the Rust WASM module. The **first** run can take **several minutes** (Rust → WASM compile). Later starts are faster if build caches exist.
+3. **`backend`** starts after `st-init` completes.
 4. Other services (auth, payment, frontend, Prometheus, Grafana) come up per `infra/docker-compose.yml`.
-
-If the backend seems slow to listen, wait; the E2E script can wait up to **600s** by default (override with `WAIT_SECS`).
 
 ### 5. URLs after services are healthy
 
 | Service | URL | Notes |
-|---------|-----|--------|
-| **Console UI** (React, served by backend) | http://localhost:8000/ | Main demo |
+|---------|-----|-------|
+| **Console UI** | http://localhost:8000/ | Main demo |
 | **Backend health** | http://localhost:8000/health | JSON health |
-| **SpacetimeDB** (host) | http://localhost:3004/v1/ping | Should return 200 |
-| **Grafana** | http://localhost:3002/ | admin / admin (host port from Compose) |
+| **SpacetimeDB** | http://localhost:3004/v1/ping | Should return 200 |
+| **Grafana** | http://localhost:3002/ | admin / admin |
 | **Prometheus** | http://localhost:9090/ | Metrics UI |
-| **Mini frontend app** | http://localhost:3001/ | Generates traffic |
+| **Mini frontend** | http://localhost:3001/ | Generates traffic |
 | **Auth API** | http://localhost:8081/health | |
 | **Payment API** | http://localhost:8082/health | |
 
 ---
 
-## Verify that everything works
+## Verify Everything Works
 
-### A. Quick HTTP checks (host)
-
-Run these in a second terminal while the stack is up:
+### A. Quick HTTP checks
 
 ```bash
 curl -sf http://localhost:8000/health
@@ -257,134 +489,74 @@ curl -sf http://localhost:8081/health
 curl -sf http://localhost:8082/health
 ```
 
-You should get **HTTP 200** responses (Prometheus returns JSON with `"status":"success"` for the query).
-
-### B. Manual UI check
+### B. Manual UI walkthrough
 
 1. Open **http://localhost:8000/**.
-2. Optionally open **http://localhost:3001/** and use Login / Pay to generate traffic (or use the `curl` health calls above).
-3. In the console, enter an incident description and click **Analyze + runbook**.
-4. Optionally enable **Attach live Prometheus snapshot** so the backend fetches instant queries from Prometheus (`PROMETHEUS_URL`, default `http://prometheus:9090` in Compose) and merges them into the metrics context for Gemini.
-5. Optionally attach a **screenshot or diagram** (PNG/JPEG/WebP/GIF, max 5MB) — the model uses it as multimodal context when `GEMINI_API_KEY` is set.
-6. Confirm **blocked** unsafe lines and a **sanitized** script; click **Execute approved runbook** (only allowed `docker` / `echo` / `sleep` lines run).
+2. Open **http://localhost:3001/** and use Login / Pay to generate traffic.
+3. Enter an incident description and click **Analyze + runbook**.
+4. Optionally enable **Attach live Prometheus snapshot** — the backend fetches instant queries from Prometheus and merges them into the Gemini prompt.
+5. Optionally attach a **screenshot or diagram** (PNG/JPEG/WebP/GIF, max 5 MB) — Gemini uses it as multimodal visual context.
+6. Review blocked/sanitized lines in the policy preview, then click **Execute approved runbook**.
 
-**Demo scripts (align with the Executive Summary):**
+**Demo replay scripts:**
 
-- **Rich multi-phase incident (recommended):** [`samples/realistic-demo.jsonl`](samples/realistic-demo.jsonl) — healthy → degradation → cascade → recovery across several synthetic services. Replay with Python (works on Windows without bash):
+```bash
+# Full multi-phase incident arc (healthy → degradation → cascade → recovery)
+python scripts/demo-replay.py --scenario full --speed 5
 
-  ```bash
-  python scripts/demo-replay.py --scenario full --speed 5
-  ```
+# Short sample replay
+bash scripts/replay-sample-logs.sh
+```
 
-  Scenarios: `healthy`, `degradation`, `cascade`, `recovery`, or `full`. Use `--speed 0` to send all lines at once; `--url http://localhost:8000` if the backend port differs. Set `BASE_URL` or pass `--secret` if `INGEST_SECRET` is configured.
-
-- **Short sample:** `bash scripts/replay-sample-logs.sh` (or set `BASE_URL` and run from Git Bash / WSL) posts [`samples/incident-sample.jsonl`](samples/incident-sample.jsonl).
-
-- **MTTR proxy:** `bash scripts/eval-mttr.sh` (optional `INJECT_FAULT=1` with Docker on the host).
-
-Mapping of PDF claims to this repo: [docs/PDF_VS_IMPLEMENTATION.md](docs/PDF_VS_IMPLEMENTATION.md). Optional **Terraform** EC2 stub: [infra/terraform/ec2-docker/README.md](infra/terraform/ec2-docker/README.md).
-
-Optional failure demo: [scripts/fault-inject.sh](scripts/fault-inject.sh) or set `FAIL_MODE=1` for `payment-service` in [infra/docker-compose.yml](infra/docker-compose.yml) and recreate that service.
+Scenarios: `healthy`, `degradation`, `cascade`, `recovery`, `full`. Use `--speed 0` to send all at once.
 
 ### C. Automated tests
 
-**1) Backend unit tests (no Docker)**
-
-Install dev dependencies once:
-
 ```bash
+# Backend unit tests (no Docker required)
 cd backend
 pip install -r requirements.txt -r requirements-dev.txt
 cd ..
-```
-
-From the **repo root**:
-
-```bash
 npm run test:unit
-```
 
-Equivalent:
-
-```bash
-cd backend && python -m pytest tests -v && cd ..
-```
-
-**2) Full-stack E2E script (requires running Compose)**
-
-With the stack up (detached or in another terminal), from the **repo root**:
-
-```bash
+# Full-stack E2E (requires running Compose stack)
 npm run test:e2e
 ```
 
-Equivalent:
-
-```bash
-bash scripts/verify-stack.sh
-```
-
-The script waits for **`/health`** (default **600** seconds). If the first Spacetime publish is still compiling, increase the wait:
+The E2E script waits up to 600 s for `/health`. If the first Spacetime publish is still compiling:
 
 ```bash
 WAIT_SECS=1200 npm run test:e2e
 ```
 
-Override endpoints if your ports differ: **`BASE_URL`**, **`PROM_URL`**, **`ST_URL`**.
-
-On **Windows**, use **Git Bash** or **WSL** so `bash` and the script path work.
-
-### D. Stop the stack
-
-```bash
-npm run stack:down
-```
-
-Or:
-
-```bash
-docker compose -f infra/docker-compose.yml --env-file .env down
-```
-
-Add **`-v`** to remove volumes if you need a clean SpacetimeDB state (destructive).
-
 ---
 
-## Cloud VM (e.g. AWS EC2)
+## API Reference
 
-1. **Instance:** Ubuntu 22.04+, open inbound **22** (SSH), **8000** (API/UI), **3000** (Grafana, optional), **3004** (SpacetimeDB HTTP, optional), **9090** (Prometheus, optional), **8081–8082**, **3001** as needed. Restrict sources to your IP for the demo.
-2. Install Docker: [Docker Engine install for Ubuntu](https://docs.docker.com/engine/install/ubuntu/).
-3. Clone the repo, copy `.env.example` to `.env`, set **`GEMINI_API_KEY`** if desired.
-4. Install Node 20 (e.g. nvm) and run **`npm run build:web`** from the repo root.
-5. Run **`npm run stack:up:detached`** (or the same `docker compose` command with `-d`).
-6. Open `http://<PUBLIC_IP>:8000/` for the console.
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/ingest` | POST | Ingest one log event: `{ service, level, message, time? }` |
+| `/ingest/batch` | POST | Ingest multiple: `{ events: [LogEvent, ...] }` |
+| `/analyze` | POST | Trigger Gemini RCA + runbook. Body: `AnalyzeRequest`. Header: `X-Session-Id` (UUID) |
+| `/execute` | POST | Execute approved runbook: `{ content, content_hash }`. Same `X-Session-Id` as analyze |
+| `/incident-query` | POST | NL question over logs: `{ question, log_limit?, include_runbook_hints? }` |
+| `/logs` | GET | Recent log history (from SpacetimeDB) |
+| `/health` | GET | Backend health JSON |
+| `/metrics` | GET | Prometheus metrics for this backend |
+| `ws://…/ws/logs` | WS | Real-time log stream + auto incident context pushes |
 
-**Security:** Do not expose the Docker socket publicly. The backend container mounts `/var/run/docker.sock` only on the trusted host.
+**`X-Session-Id` header:** A UUID stored in `localStorage` per browser tab. Keeps concurrent operators isolated in SpacetimeDB — each has their own runbook history and approved hash.
 
----
+**WebSocket message shapes:**
+```json
+// Log line (most messages)
+{ "time": "...", "service": "...", "level": "INFO", "message": "..." }
 
-## Development (Vite dev server)
-
-```bash
-cd web && npm ci && npm run dev
+// Auto incident context (every N ingests)
+{ "type": "incident_context", "text": "3-5 sentence Gemini narrative..." }
 ```
 
-**Why this differs from http://localhost:8000:** the backend serves the **built** React app (`web/dist`) and the API on **one origin** (production-style). `npm run dev` runs the **Vite** dev server instead (hot reload); it defaults to **5173** and, if that port is taken, uses the next free port (often **5174**). Vite **proxies** API and WebSocket paths to FastAPI on **8000**, so behavior matches as long as the backend is running and **`CORS_ORIGINS`** lists your Vite origin (5173, 5174, etc. — see `.env.example`).
-
-**Backend without Docker:** run a local SpacetimeDB (`spacetime start` from the [CLI](https://spacetimedb.com/docs)), publish the module (`cd spacetimedb/devops-module && spacetime publish devopsai`), set `SPACETIME_HTTP_URL=http://127.0.0.1:3000` and `SPACETIME_DATABASE=devopsai`, then from `backend/`: `pip install -r requirements.txt` and `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000` (with `web` built or `VITE_API_URL` pointing at this API).
-
----
-
-## API (curl)
-
-- `POST /ingest` — JSON: `{ "service", "level", "message", "time"? }`
-- `POST /analyze` — `{ "incident_description", "include_logs", "include_metrics_hint" }`; optional header **`X-Session-Id`** (UUID)
-- `POST /execute` — `{ "content", "content_hash" }` matching the last sanitized runbook for that session; same **`X-Session-Id`** as analyze
-- `POST /incident-query` — `{ "question", "log_limit"?, "include_runbook_hints"? }` — natural-language answers **only** from a recent log excerpt (and optional truncated runbook snippets). Requires **`GEMINI_API_KEY`** for full LLM answers; without it, the backend returns a small heuristic summary. **Limitation:** runbook history rows have **no timestamps**, so questions like “time to fix” or “MTTR” cannot be answered unless inferable from **`logs.time`** / message text; set `INCIDENT_QUERY_MAX_LOG_CHARS` (default `120000`) to cap prompt size.
-
-**WebSocket `/ws/logs`** — streams JSON log lines (`LogEvent`) as today. Additionally, after every **`INCIDENT_CONTEXT_EVERY_N`** ingested logs (default **30**), the backend may push a second message shape: `{"type":"incident_context","text":"..."}`. The React console **replaces the INCIDENT CONTEXT** textarea with `text` unless **Pause auto context** is checked. A **minimum interval** between refreshes is enforced (**`INCIDENT_CONTEXT_MIN_INTERVAL_S`**, default **45**) to limit Gemini cost. Without **`GEMINI_API_KEY`**, a compact **heuristic** paragraph is sent instead. Tune **`INCIDENT_CONTEXT_MAX_LINES`** (default 45) and **`INCIDENT_CONTEXT_MAX_MSG_LEN`** (default 140) for prompt size. Metric: `devopsai_incident_context_refresh_total`.
-
-Example:
+**Example — natural-language query:**
 
 ```bash
 curl -sf -X POST http://localhost:8000/incident-query \
@@ -394,26 +566,75 @@ curl -sf -X POST http://localhost:8000/incident-query \
 
 ---
 
-## Project layout
+## Project Layout
 
-- `spacetimedb/devops-module/` — Rust SpacetimeDB module (WASM)
-- `services/` — auth, payment, frontend microservices (Node.js + Prometheus metrics)
-- `backend/` — FastAPI, Gemini, policy, executor, SpacetimeDB HTTP client
-- `infra/` — `docker-compose.yml`, Prometheus, Grafana provisioning
-- `web/` — React console (Vite)
-- `scripts/` — `verify-stack.sh` (full-stack check), `fault-inject.sh`, `demo-replay.py` (replay [`samples/realistic-demo.jsonl`](samples/realistic-demo.jsonl))
-- `package.json` (repo root) — **`npm run build:web`**, **`stack:up`**, **`test:unit`**, **`test:e2e`** (all `docker compose` commands use **`-f infra/docker-compose.yml`**)
-- `samples/` — `realistic-demo.jsonl` (full demo arc), `incident-sample.jsonl` (short replay for `replay-sample-logs.sh`)
-- `infra/terraform/ec2-docker/` — optional AWS EC2 + Docker bootstrap (Terraform)
+```
+spacetimedb/devops-module/   Rust SpacetimeDB module (WASM) — tables + reducers
+services/                    auth, payment, mini-frontend microservices (Node.js + Prometheus metrics)
+backend/
+  app/
+    main.py                  FastAPI routes, WebSocket, anomaly poller startup
+    gemini_client.py         All 4 Gemini call sites + fallback implementations
+    persistence.py           SpacetimeDB HTTP client — reducer calls + SQL reads
+    policy.py                Command allowlist, sanitizer, SHA-256 hasher
+    executor.py              Runs approved runbook steps via Docker socket
+    anomaly_poller.py        Background Prometheus watcher + auto Gemini trigger
+    models.py                Pydantic models (LogEvent, AnalyzeRequest, GeminiAnalysisResponse, ...)
+    prometheus_snapshot.py   Instant-query builder for Prometheus metric hints
+infra/
+  docker-compose.yml         Full stack definition (backend, spacetime, st-init, services, Prometheus, Grafana)
+  grafana/                   Grafana provisioning (datasource, dashboards)
+  terraform/ec2-docker/      Optional AWS EC2 + Docker bootstrap (Terraform)
+web/                         React console (Vite + TypeScript)
+scripts/
+  verify-stack.sh            Full-stack E2E health check
+  demo-replay.py             Replay realistic-demo.jsonl scenarios
+  fault-inject.sh            Optional failure injection
+  replay-sample-logs.sh      Short sample log replay
+samples/
+  realistic-demo.jsonl       Full demo arc (healthy → cascade → recovery)
+  incident-sample.jsonl      Short replay sample
+package.json                 Root npm scripts: build:web, stack:up, stack:down, test:unit, test:e2e
+```
 
 ---
 
-## Documentation
+## Cloud VM (e.g. AWS EC2)
 
-- **SpacetimeDB:** [docs/SPACETIMEDB.md](docs/SPACETIMEDB.md)
-- **PDF vs implementation:** [docs/PDF_VS_IMPLEMENTATION.md](docs/PDF_VS_IMPLEMENTATION.md)
+1. **Instance:** Ubuntu 22.04+, open inbound 22 (SSH), 8000 (UI/API), 3002 (Grafana, optional), 3004 (SpacetimeDB, optional), 9090 (Prometheus, optional), 8081–8082, 3001 as needed.
+2. Install Docker: [Docker Engine install for Ubuntu](https://docs.docker.com/engine/install/ubuntu/).
+3. Clone the repo, copy `.env.example` to `.env`, set `GEMINI_API_KEY`.
+4. Install Node 20 (e.g. nvm) and run `npm run build:web`.
+5. Run `npm run stack:up:detached`.
+6. Open `http://<PUBLIC_IP>:8000/` for the console.
 
-For a detailed list of what is implemented versus planned work, you can maintain **`IMPLEMENTATION_STATUS.md`** at the repo root locally (gitignored by default; see `.gitignore`).
+**Security:** Do not expose the Docker socket publicly. The backend container mounts `/var/run/docker.sock` only on the trusted host.
+
+---
+
+## Development (Vite Dev Server)
+
+```bash
+cd web && npm ci && npm run dev
+```
+
+Vite defaults to port **5173** (or 5174 if taken) and proxies all API and WebSocket paths to FastAPI on **8000**. Add your Vite origin to `CORS_ORIGINS` in `.env` (see `.env.example`).
+
+**Backend without Docker:**
+
+```bash
+# 1. Start local SpacetimeDB
+spacetime start
+
+# 2. Publish the Rust module
+cd spacetimedb/devops-module && spacetime publish devopsai && cd ../..
+
+# 3. Configure and start the backend
+export SPACETIME_HTTP_URL=http://127.0.0.1:3000
+export SPACETIME_DATABASE=devopsai
+cd backend && pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
 ---
 
@@ -421,6 +642,17 @@ For a detailed list of what is implemented versus planned work, you can maintain
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on push/PR to `main` / `master`:
 
-- Builds **`web/`**, runs **pytest** in **`backend/`**, runs a small **policy import** smoke check, **builds** Compose images, and in a separate job starts the **full Compose stack** and runs **`scripts/verify-stack.sh`** (with `WAIT_SECS=1200`).
+- Builds `web/`, runs `pytest` in `backend/`, runs a policy import smoke check
+- Builds all Compose images
+- In a separate job: starts the full Compose stack and runs `scripts/verify-stack.sh` (with `WAIT_SECS=1200`)
 
-Optional: add a repository secret **`GEMINI_API_KEY`** so CI’s running backend can call Gemini during the E2E job....
+Optional: add a repository secret `GEMINI_API_KEY` so CI's running backend can call Gemini during the E2E job.
+
+---
+
+## Documentation
+
+- **SpacetimeDB setup and troubleshooting:** [docs/SPACETIMEDB.md](docs/SPACETIMEDB.md)
+- **PDF vs implementation mapping:** [docs/PDF_VS_IMPLEMENTATION.md](docs/PDF_VS_IMPLEMENTATION.md)
+- **Live telemetry / agent demo site:** [docs/AGENT_DEMO_WEBSITE.md](docs/AGENT_DEMO_WEBSITE.md)
+- **Terraform EC2 bootstrap:** [infra/terraform/ec2-docker/README.md](infra/terraform/ec2-docker/README.md)
