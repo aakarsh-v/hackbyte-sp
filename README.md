@@ -223,6 +223,30 @@ flowchart LR
 
 ## SpacetimeDB Integration
 
+### Video demo (walkthrough)
+
+**[SpacetimeDB demo — screen recording (Google Drive)](https://drive.google.com/file/d/16INH19_dP60RCWupUjsVinywG751nbgi/view?usp=sharing)** — visual walkthrough of how SpacetimeDB is used in this project alongside the rest of the stack. Watch this first for the high-level story; the subsections below are the full technical detail. Deeper operational notes are in **[docs/SPACETIMEDB.md](docs/SPACETIMEDB.md)**.
+
+### Where SpacetimeDB is used (and why it matters)
+
+In this platform, **SpacetimeDB is the single system of record** for what operators and the AI must rely on after the fact: **live telemetry** and **audit-grade runbook history**. It is not a disposable cache—it is the durable spine between microservices, the FastAPI control plane, and the React console.
+
+| Concern | Without a purpose-built store | What SpacetimeDB gives us here |
+|--------|------------------------------|--------------------------------|
+| **Log continuity** | In-memory buffers vanish on restart; log files are awkward to query uniformly | **`logs`** table: append-only rows with server-side trim (2000 lines), so Gemini, `/analyze`, WebSocket replay, and anomaly detection all read **one coherent tail** |
+| **Multi-operator safety** | A single shared runbook file overwrites the last incident | **`session_runbook_history`**: append-only rows (PK `id`), scoped by **`X-Session-Id`**, so concurrent incident commanders do not clobber each other’s approved hashes |
+| **Operational surface area** | Another RDBMS + migrations + pool tuning | **One container**, **Rust → WASM module**, **HTTP reducers + SQL**—[`persistence.py`](backend/app/persistence.py) stays a thin `httpx` client |
+
+Every `POST /ingest` from the demo services becomes an **`ingest_log`** reducer call: the database **owns** ordering and retention. Every successful analysis persists the sanitized script and SHA-256 via **`append_session_runbook`**, so **`/execute` is not “whatever the UI remembers”—it is “what was written and hashed in SpacetimeDB for this session.” That separation—**Gemini reasons**, **Docker acts**, **SpacetimeDB remembers**—is what makes the demo narratable as architecture, not as a glued-on chatbot.
+
+### How SpacetimeDB is used end-to-end (detailed)
+
+1. **Ingest** — Demo services (or replay scripts) `POST /ingest` to FastAPI. The backend calls **`ingest_log`** on SpacetimeDB, which inserts into **`logs`** and trims beyond 2000 rows inside the WASM module.
+2. **Live UI** — On WebSocket connect, clients receive a tail of rows read from **`logs`** via SQL; new lines broadcast after each ingest still ultimately **persist in SpacetimeDB** first (so reconnects and `/logs` stay consistent).
+3. **Analyze** — `POST /analyze` loads a **log tail** from SpacetimeDB (not from an ephemeral Python list alone), sends it to Gemini, then stores the **sanitized runbook + hash** with **`append_session_runbook`** in **`session_runbook_history`** for the caller’s **`X-Session-Id`**.
+4. **Execute** — `POST /execute` loads the **latest row** for that session from **`session_runbook_history`** and checks the hash **against what is stored** before running Docker. No hash match → no execution.
+5. **Ask logs** — `POST /incident-query` can attach recent **`logs`** text and optional **truncated runbook rows** from **`session_runbook_history`** so answers stay grounded in what the database actually holds.
+
 SpacetimeDB provides persistent, real-time storage for log events and per-session runbook history.  
 The module is written in **Rust** and compiled to **WASM**: [`spacetimedb/devops-module/src/lib.rs`](spacetimedb/devops-module/src/lib.rs).  
 The FastAPI backend talks to it over **HTTP** (`/v1/database/{name}/call/...` for writes, `/v1/database/{name}/sql` for reads).  
@@ -310,12 +334,13 @@ SELECT * FROM session_runbook_history
 Returns the last `limit` rows (sorted by id), with each script truncated to 400 chars. Used by:
 - `POST /incident-query` (when `include_runbook_hints=true`) — appended to Gemini's context so it can reference past remediation steps when answering questions
 
-### Why SpacetimeDB
+### Why SpacetimeDB (the short pitch)
 
-- **Real-time, WASM-native** — the module compiles to WASM and runs inside the SpacetimeDB engine, keeping persistence co-located with the event-streaming runtime
-- **Per-session isolation** — concurrent operators (different `X-Session-Id` values) each have their own runbook history; no shared mutable state between operators
-- **No extra infrastructure** — runs as a single Docker container; no separate database server, no ORM, no migrations
-- **Persists across backend restarts** — logs and runbook history survive backend container restarts without losing data
+- **WASM-native module** — business rules (trim logs, insert runbooks) live in **Rust compiled to WASM** and run **inside** the database runtime, not in ad hoc Python cron jobs. That keeps hot paths predictable and auditable.
+- **Per-session isolation** — concurrent operators (different `X-Session-Id` values) each have their own **append-only** runbook history; no “last writer wins” in a shared row.
+- **Minimal moving parts** — one SpacetimeDB service in Compose, one published module name (`SPACETIME_DATABASE`), **no** SQLAlchemy migrations or second network hop to Postgres for this use case.
+- **Survives chaos** — restart the **backend** container: logs and runbook rows are still there; reconnect the UI and `/execute` still validates against stored hashes.
+- **Fits the AI loop** — tail queries feed Gemini and incident-query; reducers keep writes **fast and structured** so you are not dumping opaque blobs into a document store and hoping for the best.
 
 ### SpacetimeDB Data Flow
 
