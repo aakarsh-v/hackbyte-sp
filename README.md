@@ -60,13 +60,18 @@ flowchart TB
 | **Python 3.12+** with `pip` | Backend unit tests (optional, local) |
 | **bash**, **curl** | E2E script `scripts/verify-stack.sh` (Git Bash or WSL on Windows) |
 
+- **Compose file path:** the stack is defined in **`infra/docker-compose.yml`**. Raw `docker compose` commands must use **`-f infra/docker-compose.yml`** (or **`npm run stack:*`**, which sets it for you).
 - **Google AI Studio API key** for Gemini — optional; the backend uses fallback templates when it is not set.
 
 ---
 
 ## Quick start — commands to run the program
 
-From the **repository root** (Linux, macOS, or **Git Bash / WSL** on Windows):
+Always run commands from the **repository root** (`E:\hackbyte 1` or your clone). The Compose file is **`infra/docker-compose.yml`**, not in the root folder.
+
+**Recommended:** use the **npm scripts** below — they already pass `-f infra/docker-compose.yml` and `--env-file .env`, so you do not need to remember paths.
+
+### Linux, macOS, Git Bash, or WSL
 
 ```bash
 # 1) Environment (copy example and optionally edit GEMINI_API_KEY, etc.)
@@ -85,13 +90,30 @@ npm run stack:up
 npm run stack:up:detached
 ```
 
+### Windows PowerShell
+
+Same steps; use `Copy-Item` if you prefer not to use `cp`:
+
+```powershell
+cd "E:\hackbyte 1"   # use your actual clone path
+Copy-Item .env.example .env
+npm run build:web
+npm run stack:up:detached
+```
+
+If you run **`docker compose` by hand** (not via `npm run`), you **must** point at the compose file or Docker prints `no configuration file provided`:
+
+```powershell
+docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env up -d --build
+docker compose -f infra/docker-compose.yml logs frontend-service --tail 20
+docker compose -f infra/docker-compose.yml --env-file .env down
+```
+
+Optional one-liner for a session: `$env:COMPOSE_FILE = "infra/docker-compose.yml"` (still use `--profile local-spacetime` when starting the full local stack).
+
 **Then open the app:** [http://localhost:8000/](http://localhost:8000/) (main console). In the **SuperPlane Sandbox** tab, use **Ask your logs (natural language)** to query recent stored logs in plain English (`POST /incident-query`; set `GEMINI_API_KEY` for full answers).
 
-**Stop the stack** (if you used detached mode):
-
-```bash
-npm run stack:down
-```
+**Stop the stack** (if you used detached mode): `npm run stack:down` (same on bash or PowerShell from the repo root).
 
 **Optional checks** (with the stack running, second terminal):
 
@@ -172,6 +194,26 @@ Add `-d` for detached mode.
 npm run stack:up:maincloud
 ```
 
+### 3b. Rebuild demo microservices (auth, payment, frontend)
+
+The Node services under `services/` are **baked into Docker images** at build time. After you change their code, **rebuild and recreate** those containers or the UI will keep showing old log text (e.g. `simulated login`).
+
+From the **repository root**:
+
+```bash
+docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env build auth-service payment-service frontend-service
+docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env up -d --force-recreate auth-service payment-service frontend-service
+```
+
+**Windows PowerShell** (same paths):
+
+```powershell
+docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env build auth-service payment-service frontend-service
+docker compose --profile local-spacetime -f infra/docker-compose.yml --env-file .env up -d --force-recreate auth-service payment-service frontend-service
+```
+
+If you use **Maincloud** (no `local-spacetime` profile), omit `--profile local-spacetime` on both lines.
+
 ### 4. What to expect on first start
 
 **If using embedded local SpacetimeDB** (`--profile local-spacetime`):
@@ -226,7 +268,21 @@ You should get **HTTP 200** responses (Prometheus returns JSON with `"status":"s
 5. Optionally attach a **screenshot or diagram** (PNG/JPEG/WebP/GIF, max 5MB) — the model uses it as multimodal context when `GEMINI_API_KEY` is set.
 6. Confirm **blocked** unsafe lines and a **sanitized** script; click **Execute approved runbook** (only allowed `docker` / `echo` / `sleep` lines run).
 
-**Demo scripts (align with the Executive Summary):** replay synthetic logs with `bash scripts/replay-sample-logs.sh` (see [`samples/incident-sample.jsonl`](samples/incident-sample.jsonl)); measure a proxy **MTTR** (time to successful `/analyze`) with `bash scripts/eval-mttr.sh` (optional `INJECT_FAULT=1` with Docker on the host). Mapping of PDF claims to this repo: [docs/PDF_VS_IMPLEMENTATION.md](docs/PDF_VS_IMPLEMENTATION.md). Optional **Terraform** EC2 stub: [infra/terraform/ec2-docker/README.md](infra/terraform/ec2-docker/README.md).
+**Demo scripts (align with the Executive Summary):**
+
+- **Rich multi-phase incident (recommended):** [`samples/realistic-demo.jsonl`](samples/realistic-demo.jsonl) — healthy → degradation → cascade → recovery across several synthetic services. Replay with Python (works on Windows without bash):
+
+  ```bash
+  python scripts/demo-replay.py --scenario full --speed 5
+  ```
+
+  Scenarios: `healthy`, `degradation`, `cascade`, `recovery`, or `full`. Use `--speed 0` to send all lines at once; `--url http://localhost:8000` if the backend port differs. Set `BASE_URL` or pass `--secret` if `INGEST_SECRET` is configured.
+
+- **Short sample:** `bash scripts/replay-sample-logs.sh` (or set `BASE_URL` and run from Git Bash / WSL) posts [`samples/incident-sample.jsonl`](samples/incident-sample.jsonl).
+
+- **MTTR proxy:** `bash scripts/eval-mttr.sh` (optional `INJECT_FAULT=1` with Docker on the host).
+
+Mapping of PDF claims to this repo: [docs/PDF_VS_IMPLEMENTATION.md](docs/PDF_VS_IMPLEMENTATION.md). Optional **Terraform** EC2 stub: [infra/terraform/ec2-docker/README.md](infra/terraform/ec2-docker/README.md).
 
 Optional failure demo: [scripts/fault-inject.sh](scripts/fault-inject.sh) or set `FAIL_MODE=1` for `payment-service` in [infra/docker-compose.yml](infra/docker-compose.yml) and recreate that service.
 
@@ -343,9 +399,9 @@ curl -sf -X POST http://localhost:8000/incident-query \
 - `backend/` — FastAPI, Gemini, policy, executor, SpacetimeDB HTTP client
 - `infra/` — `docker-compose.yml`, Prometheus, Grafana provisioning
 - `web/` — React console (Vite)
-- `scripts/` — `verify-stack.sh` (full-stack check), `fault-inject.sh`
-- `package.json` (repo root) — **`npm run build:web`**, **`stack:up`**, **`test:unit`**, **`test:e2e`**
-- `samples/` — synthetic incident lines for `scripts/replay-sample-logs.sh`
+- `scripts/` — `verify-stack.sh` (full-stack check), `fault-inject.sh`, `demo-replay.py` (replay [`samples/realistic-demo.jsonl`](samples/realistic-demo.jsonl))
+- `package.json` (repo root) — **`npm run build:web`**, **`stack:up`**, **`test:unit`**, **`test:e2e`** (all `docker compose` commands use **`-f infra/docker-compose.yml`**)
+- `samples/` — `realistic-demo.jsonl` (full demo arc), `incident-sample.jsonl` (short replay for `replay-sample-logs.sh`)
 - `infra/terraform/ec2-docker/` — optional AWS EC2 + Docker bootstrap (Terraform)
 
 ---

@@ -1,5 +1,10 @@
-{"time":"2026-04-04T10:00:01Z","service":"auth-service","level":"INFO","message":"User login succeeded for demo-user"}
-{"time":"2026-04-04T10:00:02Z","service":"payment-service","level":"WARN","message":"High latency on /pay p99=850ms"}
-{"time":"2026-04-04T10:00:05Z","service":"payment-service","level":"ERROR","message":"HTTP 503 on /pay — upstream timeout"}
-{"time":"2026-04-04T10:00:06Z","service":"payment-service","level":"ERROR","message":"HTTP 503 on /pay — circuit open"}
-{"time":"2026-04-04T10:00:10Z","service":"frontend-service","level":"INFO","message":"Checkout flow retried twice"}
+{"time":"2026-04-05T09:00:12Z","service":"auth-service","level":"INFO","message":"POST /login 200 — user=alice@acme.com login succeeded","extra":{"user":"alice@acme.com"}}
+{"time":"2026-04-05T09:00:13Z","service":"payment-service","level":"INFO","message":"POST /pay 200 — txn=txn-1001 amount=$49.99 processed in 112ms","extra":{"txn_id":"txn-1001","latency_ms":112}}
+{"time":"2026-04-05T09:02:00Z","service":"database","level":"WARN","message":"Slow query detected — SELECT * FROM transactions WHERE user_id=? (duration=1240ms, threshold=200ms)","extra":{"query_ms":1240}}
+{"time":"2026-04-05T09:02:05Z","service":"payment-service","level":"WARN","message":"POST /pay — upstream DB latency elevated p99=1350ms (threshold=500ms)","extra":{"p99_ms":1350}}
+{"time":"2026-04-05T09:03:00Z","service":"database","level":"ERROR","message":"Connection pool exhausted — pool_size=20, waiting=47, timeout after 5000ms","extra":{"pool_size":20,"waiting":47}}
+{"time":"2026-04-05T09:03:01Z","service":"payment-service","level":"ERROR","message":"POST /pay 503 Service Unavailable — DB unreachable, rejecting request","extra":{"status":503,"reason":"db_unavailable"}}
+{"time":"2026-04-05T09:03:04Z","service":"payment-service","level":"ERROR","message":"Circuit breaker tripped OPEN — all /pay requests will fast-fail for 30s","extra":{"circuit_breaker":"OPEN"}}
+{"time":"2026-04-05T09:03:05Z","service":"api-gateway","level":"ERROR","message":"POST /api/pay — upstream payment-service 502 Bad Gateway (circuit open)","extra":{"upstream":"payment-service","status":502}}
+{"time":"2026-04-05T09:03:11Z","service":"database","level":"ERROR","message":"FATAL: server process crashed — waiting for recovery, connections refused","extra":{"state":"crashed"}}
+{"time":"2026-04-05T09:03:53Z","service":"payment-service","level":"INFO","message":"Circuit breaker CLOSED — DB reconnected, normal traffic resuming","extra":{"circuit_breaker":"CLOSED"}}
